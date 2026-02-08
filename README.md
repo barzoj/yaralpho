@@ -2,6 +2,15 @@
 
 Ralph Runner is a Go 1.21+ service that ingests work items, classifies them, and drives a Copilot-powered agent loop with storage, tracking, queueing, and Slack notifications.
 
+## How it works
+
+- **Queue + single consumer:** `/add` enqueues work into an in-memory FIFO queue; one consumer pulls items sequentially, so only one task runs at a time and order is preserved.
+- **Classification:** the consumer asks the tracker (beads CLI) whether an item is an epic; for epics it picks the first ready child to run.
+- **Copilot sessions:** every task run opens a fresh GitHub Copilot SDK session, auto-approves prompts/permissions, and streams raw events to storage.
+- **Storage + progress:** Mongo stores batches, runs, and session events; batch progress counts pending/running/done from storage.
+- **Logging & notifications:** zap logging is used end-to-end with request IDs from middleware. Slack notifications are sent when a webhook is set; when unset the Slack notifier is a noop.
+- **Agent etiquette:** follow AGENTS guides (root `AGENTS.md` + `internal/app/AGENTS.md`) when extending handlers or wiring.
+
 ## Configuration
 
 The config loader is **environment-first** with an optional JSON fallback:
@@ -38,7 +47,7 @@ The config loader is **environment-first** with an optional JSON fallback:
   "YARALPHO_REPO_PATH": "/abs/path/to/repo",
   "YARALPHO_BD_REPO": "/abs/path/to/bd/repo",
   "YARALPHO_PORT": "8080",
-  "COPILOT_GITHUB_TOKEN": "ghp_redacted_token",
+  "COPILOT_GITHUB_TOKEN": "ghp_REDACTED_token",
   "GH_TOKEN": "",
   "GITHUB_TOKEN": "",
   "YARALPHO_SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T000/B000/REDACTED"
@@ -46,3 +55,44 @@ The config loader is **environment-first** with an optional JSON fallback:
 ```
 
 Place this file at `config.json` or point `RALPH_CONFIG` to it. Environment variables always take precedence over the JSON values.
+
+## API
+
+Base URL defaults to `http://localhost:8080`.
+
+### POST /add
+- Query: `items` (comma-separated issue refs), `session_name` (optional label, defaults to `default`).
+- Example:
+```bash
+curl -X POST "http://localhost:8080/add?items=PROJ-1,PROJ-2&session_name=demo"
+```
+Response: `{"batch_id":"batch-1700000000000000000"}`
+
+### GET /batches
+- Optional `limit` (default 50, max 200).
+```bash
+curl "http://localhost:8080/batches?limit=20"
+```
+
+### GET /batches/{id}
+```bash
+curl "http://localhost:8080/batches/batch-1700000000000000000"
+```
+
+### GET /batches/{id}/progress
+```bash
+curl "http://localhost:8080/batches/batch-1700000000000000000/progress"
+```
+Returns counts of pending/running/done tasks for the batch.
+
+### GET /runs
+- Optional `batch_id` to filter; `limit` (default 50, max 200) slices the returned list.
+```bash
+curl "http://localhost:8080/runs?batch_id=batch-1700000000000000000&limit=25"
+```
+
+### GET /runs/{id}
+- Optional `event_limit` caps returned session events (default 50, max 200). Response includes `events_truncated` and `session_event_cap` to signal the cap used.
+```bash
+curl "http://localhost:8080/runs/run-123?event_limit=100"
+```
