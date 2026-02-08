@@ -1,0 +1,11 @@
+{
+  "YARALPHO_MONGODB_URI": "mongodb://localhost:27017",
+  "YARALPHO_MONGODB_DB": "ralph",
+  "YARALPHO_REPO_PATH": "/path/to/repo",
+  "YARALPHO_BD_REPO": "/path/to/bd/repo",
+  "YARALPHO_PORT": "8080",
+  "COPILOT_GITHUB_TOKEN": "ghp_example",
+  "GH_TOKEN": "",
+  "GITHUB_TOKEN": "",
+  "YARALPHO_SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+}
