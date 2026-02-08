@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/barzoj/yaralpho/internal/storage"
 	"go.mongodb.org/mongo-driver/bson"
@@ -65,7 +66,12 @@ func (c *Client) ListTaskRuns(ctx context.Context, batchID string) ([]storage.Ta
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
 
-	cur, err := c.taskRuns.Find(ctx, bson.M{"batch_id": batchID}, options.Find().SetSort(bson.D{{Key: "started_at", Value: -1}}))
+	filter := bson.M{}
+	if strings.TrimSpace(batchID) != "" {
+		filter["batch_id"] = batchID
+	}
+
+	cur, err := c.taskRuns.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "started_at", Value: -1}}))
 	if err != nil {
 		c.logger.Error("list task runs", zap.Error(err), zap.String("batch_id", batchID))
 		return nil, fmt.Errorf("list task runs: %w", err)

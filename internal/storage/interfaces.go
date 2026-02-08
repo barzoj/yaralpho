@@ -14,6 +14,8 @@ type Storage interface {
 	CreateTaskRun(ctx context.Context, run *TaskRun) error
 	UpdateTaskRun(ctx context.Context, run *TaskRun) error
 	GetTaskRun(ctx context.Context, runID string) (*TaskRun, error)
+	// ListTaskRuns returns runs for a batch. If batchID is empty, implementations
+	// may return runs across all batches.
 	ListTaskRuns(ctx context.Context, batchID string) ([]TaskRun, error)
 
 	InsertSessionEvent(ctx context.Context, event *SessionEvent) error

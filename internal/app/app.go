@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,20 +31,21 @@ type Consumer interface {
 // consumer. Run starts the HTTP server and consumer and blocks until context
 // cancellation or a fatal error.
 type App struct {
-	cfg       config.Config
-	logger    *zap.Logger
-	storage   storage.Storage
-	queue     queue.Queue
-	tracker   tracker.Tracker
-	notifier  notify.Notifier
-	copilot   copilot.Client
-	consumer  Consumer
-	router    *mux.Router
-	server    *http.Server
-	closers   []func(context.Context) error
-	started   uint32
-	startOnce sync.Once
-	wg        sync.WaitGroup
+	cfg        config.Config
+	logger     *zap.Logger
+	storage    storage.Storage
+	queue      queue.Queue
+	tracker    tracker.Tracker
+	notifier   notify.Notifier
+	copilot    copilot.Client
+	consumer   Consumer
+	router     *mux.Router
+	server     *http.Server
+	closers    []func(context.Context) error
+	started    uint32
+	reqCounter uint64
+	startOnce  sync.Once
+	wg         sync.WaitGroup
 }
 
 // Build constructs the production App using concrete implementations. All
@@ -228,28 +228,6 @@ func (a *App) Router() *mux.Router {
 	return a.router
 }
 
-func (a *App) registerRoutes() {
-	a.router.HandleFunc("/health", a.healthHandler).Methods(http.MethodGet)
-
-	// Primary endpoints are stubbed for now; Task 11 will provide behavior.
-	a.router.HandleFunc("/add", a.notImplementedHandler).Methods(http.MethodPost)
-	a.router.HandleFunc("/batches", a.notImplementedHandler).Methods(http.MethodGet)
-	a.router.HandleFunc("/batches/{id}", a.notImplementedHandler).Methods(http.MethodGet)
-	a.router.HandleFunc("/batches/{id}/progress", a.notImplementedHandler).Methods(http.MethodGet)
-	a.router.HandleFunc("/runs", a.notImplementedHandler).Methods(http.MethodGet)
-	a.router.HandleFunc("/runs/{id}", a.notImplementedHandler).Methods(http.MethodGet)
-}
-
 func (a *App) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (a *App) notImplementedHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not implemented"})
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
 }
