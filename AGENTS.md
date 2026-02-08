@@ -38,3 +38,13 @@ bd sync               # Sync with git
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
+## Internal Package Map
+
+- `internal/app` – Composition root; wires config, logger, storage, queue, tracker, notifier, copilot, consumer, and HTTP handlers.
+- `internal/config` – Env-first configuration loader (YARALPHO_*), optional JSON fallback, panic on missing required keys.
+- `internal/storage` – Domain models and storage interfaces for batches, task runs, and session events; Mongo implementation lives in `internal/storage/mongo`.
+- `internal/queue` – FIFO queue contract and in-memory implementation supporting a single consumer with context-aware dequeue.
+- `internal/consumer` – Worker loop that dequeues items, classifies epics vs tasks via tracker, runs copilot sessions, persists events/status, and triggers notifications.
+- `internal/copilot` – Interface for starting copilot sessions and streaming raw events; GitHub Copilot SDK implementation auto-approves permissions.
+- `internal/tracker` – Tracker contract to detect epics and list child tasks; beads CLI-backed implementation.
+- `internal/notify` – Notifier interface for task/batch lifecycle events; Slack webhook implementation with noop fallback.
