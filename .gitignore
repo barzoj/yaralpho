@@ -38,3 +38,10 @@ go.work.sum
 .beads
 
 /temp
+
+# Ralph
+RALPH.md
+run_ralph.sh
+
+# TMP: remove /docs
+/docs
