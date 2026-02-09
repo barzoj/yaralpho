@@ -11,6 +11,137 @@
   const LIST_LIMIT = 50;
   const EVENTS_LIMIT = 10000;
 
+  const EVENT_META = {
+    abort: { emoji: "⛔", label: "Session aborted" },
+    "assistant.intent": {
+      emoji: "🎯",
+      label: "Assistant intent",
+      summary: (data) => data?.intent,
+    },
+    "assistant.message": {
+      emoji: "🤖",
+      label: "Assistant message",
+      summary: (data) =>
+        data?.content || (data?.encryptedContent ? "Encrypted message" : ""),
+    },
+    "assistant.message_delta": { hidden: true },
+    "assistant.reasoning": {
+      emoji: "🧠",
+      label: "Assistant reasoning",
+      summary: (data) => data?.content || data?.reasoningText,
+    },
+    "assistant.reasoning_delta": { hidden: true },
+    "assistant.turn_end": {
+      emoji: "🔚",
+      label: "Turn end",
+      summary: (data) => (data?.turnId ? `Turn ${data.turnId}` : ""),
+    },
+    "assistant.turn_start": {
+      emoji: "🔜",
+      label: "Turn start",
+      summary: (data) => (data?.turnId ? `Turn ${data.turnId}` : ""),
+    },
+    "assistant.usage": {
+      emoji: "📊",
+      label: "Usage",
+      summary: (data) => formatUsageSummary(data),
+    },
+    "hook.end": { emoji: "🪝", label: "Hook end" },
+    "hook.start": { emoji: "🪝", label: "Hook start" },
+    "pending_messages.modified": {
+      emoji: "⏳",
+      label: "Pending messages updated",
+    },
+    "session.compaction_complete": {
+      emoji: "🧹",
+      label: "Compaction complete",
+    },
+    "session.compaction_start": { emoji: "🧹", label: "Compaction start" },
+    "session.error": {
+      emoji: "⚠️",
+      label: "Session error",
+      summary: (data) => data?.message || data?.reason,
+    },
+    "session.handoff": { emoji: "🤝", label: "Session handoff" },
+    "session.idle": { emoji: "💤", label: "Session idle" },
+    "session.info": { emoji: "ℹ️", label: "Session info" },
+    "session.model_change": {
+      emoji: "🧠",
+      label: "Model change",
+      summary: (data) =>
+        [data?.previousModel, data?.newModel].filter(Boolean).join(" → "),
+    },
+    "session.resume": { emoji: "▶️", label: "Session resume" },
+    "session.shutdown": { emoji: "⏻", label: "Session shutdown" },
+    "session.snapshot_rewind": { emoji: "⏪", label: "Snapshot rewind" },
+    "session.start": { emoji: "🚀", label: "Session start" },
+    "session.truncation": {
+      emoji: "✂️",
+      label: "Session truncation",
+      summary: (data) => formatTruncationSummary(data),
+    },
+    "session.usage_info": {
+      emoji: "📈",
+      label: "Usage info",
+      summary: (data) => formatUsageInfoSummary(data),
+    },
+    "skill.invoked": {
+      emoji: "📦",
+      label: "Skill invoked",
+      summary: (data) =>
+        data?.name || (data?.content ? data.content.split("\n")[0] : ""),
+    },
+    "subagent.completed": { emoji: "✅", label: "Subagent completed" },
+    "subagent.failed": {
+      emoji: "❌",
+      label: "Subagent failed",
+      summary: (data) => data?.reason,
+    },
+    "subagent.selected": {
+      emoji: "🧩",
+      label: "Subagent selected",
+      summary: (data) => data?.agentDisplayName || data?.agentName,
+    },
+    "subagent.started": {
+      emoji: "▶️",
+      label: "Subagent started",
+      summary: (data) => data?.agentDisplayName || data?.agentName,
+    },
+    "system.message": {
+      emoji: "🛡️",
+      label: "System message",
+      summary: (data) => data?.content || data?.transformedContent,
+    },
+    "tool.execution_complete": {
+      emoji: "🛠️",
+      label: "Tool complete",
+      summary: (data) => formatToolSummary(data),
+    },
+    "tool.execution_partial_result": {
+      emoji: "🛠️",
+      label: "Tool partial result",
+      summary: (data) => data?.partialOutput || formatToolSummary(data),
+    },
+    "tool.execution_progress": {
+      emoji: "🛠️",
+      label: "Tool progress",
+      summary: (data) => data?.progressMessage || formatToolSummary(data),
+    },
+    "tool.execution_start": {
+      emoji: "🛠️",
+      label: "Tool start",
+      summary: (data) => formatToolSummary(data),
+    },
+    "tool.user_requested": { emoji: "🙋", label: "Tool requested by user" },
+    "user.message": {
+      emoji: "🧑",
+      label: "User message",
+      summary: (data) => data?.content || data?.transformedContent,
+    },
+  };
+
+  const DEFAULT_EVENT_META = { emoji: "❔", label: "Unknown event" };
+
   function setStatus(text, type = "info") {
     statusEl.textContent = text;
     statusEl.className = `status ${type}`;
@@ -128,6 +259,102 @@
     return table;
   }
 
+  function getEventType(evt) {
+    return (evt && (evt.event?.type || evt.type)) || "unknown";
+  }
+
+  function getEventMeta(type) {
+    return EVENT_META[type] || { ...DEFAULT_EVENT_META };
+  }
+
+  function shouldRenderEvent(evt) {
+    const meta = getEventMeta(getEventType(evt));
+    return !meta.hidden;
+  }
+
+  function filterRenderableEvents(events) {
+    return (events || []).filter(shouldRenderEvent);
+  }
+
+  function formatUsageSummary(data) {
+    if (!data) return "";
+    const parts = [];
+    if (Number.isFinite(data.inputTokens)) parts.push(`in ${data.inputTokens}`);
+    if (Number.isFinite(data.outputTokens)) parts.push(`out ${data.outputTokens}`);
+    if (Number.isFinite(data.cacheReadTokens))
+      parts.push(`cache ${data.cacheReadTokens}`);
+    if (Number.isFinite(data.cacheWriteTokens))
+      parts.push(`cache write ${data.cacheWriteTokens}`);
+    if (Number.isFinite(data.cost)) parts.push(`$${data.cost.toFixed(4)}`);
+    return parts.join(" · ");
+  }
+
+  function formatUsageInfoSummary(data) {
+    if (!data) return "";
+    const parts = [];
+    if (Number.isFinite(data.currentTokens)) parts.push(`current ${data.currentTokens}`);
+    if (Number.isFinite(data.tokenLimit)) parts.push(`limit ${data.tokenLimit}`);
+    if (Number.isFinite(data.messagesLength))
+      parts.push(`messages ${data.messagesLength}`);
+    return parts.join(" · ");
+  }
+
+  function formatTruncationSummary(data) {
+    if (!data) return "";
+    const parts = [];
+    if (Number.isFinite(data.eventsRemoved)) parts.push(`events removed ${data.eventsRemoved}`);
+    if (Number.isFinite(data.tokensRemoved)) parts.push(`tokens removed ${data.tokensRemoved}`);
+    if (data.upToEventId) parts.push(`up to ${data.upToEventId}`);
+    return parts.join(" · ");
+  }
+
+  function formatToolSummary(data) {
+    if (!data) return "";
+    const name = data.toolName || data.mcpToolName || data.mcpServerName || data.name;
+    const callId = data.toolCallId;
+    const parts = [];
+    if (name) parts.push(name);
+    if (callId) parts.push(`(${callId})`);
+    if (data.result?.content) parts.push(data.result.content);
+    if (typeof data.partialOutput === "string") parts.push(data.partialOutput);
+    if (typeof data.progressMessage === "string") parts.push(data.progressMessage);
+    if (data.arguments && typeof data.arguments === "string") {
+      parts.push(data.arguments.slice(0, 80));
+    }
+    return parts.join(" ").trim();
+  }
+
+  function formatEventSummary(evt, meta) {
+    const data = evt?.event?.data || {};
+    if (typeof meta.summary === "function") {
+      const summary = meta.summary(data, evt);
+      if (summary) return summary;
+    }
+    return "";
+  }
+
+  function createDetailsSection(contentNode) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "details-toggle";
+    toggle.textContent = "Show details";
+    toggle.setAttribute("aria-expanded", "false");
+
+    const details = document.createElement("div");
+    details.className = "event-details";
+    details.hidden = true;
+    details.appendChild(contentNode);
+
+    toggle.addEventListener("click", () => {
+      const willShow = details.hidden;
+      details.hidden = !willShow;
+      toggle.textContent = willShow ? "Hide details" : "Show details";
+      toggle.setAttribute("aria-expanded", String(willShow));
+    });
+
+    return { toggle, details };
+  }
+
   async function renderBatches() {
     viewTitle.textContent = "Batches";
     renderBreadcrumbs([]);
@@ -238,28 +465,69 @@
     const wrapper = document.createElement("div");
     wrapper.className = "events";
 
-    if (!events.length) {
+    const visibleEvents = filterRenderableEvents(events || []);
+
+    if (!visibleEvents.length) {
       wrapper.appendChild(emptyState("No events recorded for this run."));
       return wrapper;
     }
 
-    events.forEach((evt, idx) => {
+    visibleEvents.forEach((evt) => {
+      const type = getEventType(evt);
+      const meta = getEventMeta(type);
+
       const item = document.createElement("div");
       item.className = "event";
 
+      const emoji = document.createElement("div");
+      emoji.className = "event-emoji";
+      emoji.textContent = meta.emoji || DEFAULT_EVENT_META.emoji;
+      item.appendChild(emoji);
+
+      const body = document.createElement("div");
+      body.className = "event-body";
+
       const header = document.createElement("div");
       header.className = "event-header";
-      header.textContent = `Event ${idx + 1}`;
+
+      const title = document.createElement("div");
+      title.className = "event-title";
+      title.textContent = meta.label || DEFAULT_EVENT_META.label;
+      header.appendChild(title);
+
+      const metaRow = document.createElement("div");
+      metaRow.className = "event-meta";
 
       const ts = document.createElement("span");
+      ts.className = "event-ts";
       ts.textContent = formatDate(evt.ingested_at);
-      header.appendChild(ts);
+      metaRow.appendChild(ts);
+
+      const typeLabel = document.createElement("span");
+      typeLabel.className = "event-type";
+      typeLabel.textContent = type;
+      metaRow.appendChild(typeLabel);
+
+      header.appendChild(metaRow);
+      body.appendChild(header);
+
+      const summary = formatEventSummary(evt, meta);
+      if (summary) {
+        const summaryEl = document.createElement("div");
+        summaryEl.className = "event-summary";
+        summaryEl.textContent = summary;
+        body.appendChild(summaryEl);
+      }
 
       const pre = document.createElement("pre");
       pre.textContent = JSON.stringify(evt.event ?? evt, null, 2);
 
-      item.appendChild(header);
-      item.appendChild(pre);
+      const { toggle, details } = createDetailsSection(pre);
+
+      body.appendChild(toggle);
+      body.appendChild(details);
+
+      item.appendChild(body);
       wrapper.appendChild(item);
     });
 
@@ -316,11 +584,17 @@
 
     const info = document.createElement("div");
     info.className = "pill";
-    const count = eventsData.count ?? (eventsData.events ? eventsData.events.length : 0);
-    info.textContent = `${count} event${count === 1 ? "" : "s"} loaded`;
+    const rawEvents = eventsData.events || [];
+    const visibleEvents = filterRenderableEvents(rawEvents);
+    const totalCount = eventsData.count ?? rawEvents.length;
+    const hiddenCount = Math.max(0, totalCount - visibleEvents.length);
+    info.textContent =
+      hiddenCount > 0
+        ? `${visibleEvents.length} of ${totalCount} events shown (streaming deltas hidden)`
+        : `${visibleEvents.length} event${visibleEvents.length === 1 ? "" : "s"} loaded`;
     contentEl.appendChild(info);
 
-    contentEl.appendChild(renderEventsList(eventsData.events || []));
+    contentEl.appendChild(renderEventsList(visibleEvents));
 
     if (eventsData.events_truncated) {
       const note = document.createElement("div");
