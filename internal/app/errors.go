@@ -13,8 +13,8 @@ import (
 const (
 	defaultListLimit   = 50
 	maxListLimit       = 200
-	defaultEventsLimit = 50
-	maxEventsLimit     = 200
+	defaultEventsLimit = 10000
+	maxEventsLimit     = 100000
 )
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

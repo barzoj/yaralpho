@@ -9,7 +9,7 @@
   const runParam = params.get("run");
 
   const LIST_LIMIT = 50;
-  const EVENTS_LIMIT = 200;
+  const EVENTS_LIMIT = 10000;
 
   function setStatus(text, type = "info") {
     statusEl.textContent = text;
