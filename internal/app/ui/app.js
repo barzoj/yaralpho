@@ -16,7 +16,7 @@
     "assistant.intent": {
       emoji: "🎯",
       label: "Assistant intent",
-      summary: (data) => data?.intent,
+      render: renderAssistantIntent,
     },
     "assistant.message": {
       emoji: "🤖",
@@ -375,6 +375,11 @@
       "chat-pending",
       "Pending messages updated"
     );
+  }
+
+  function renderAssistantIntent(evt) {
+    const data = getEventData(evt);
+    return createChatBubble(data?.intent, "chat-intent", "(intent not provided)");
   }
 
   function formatEventSummary(evt, meta) {
