@@ -1,6 +1,10 @@
 package app
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/barzoj/yaralpho/internal/app/ui"
+)
 
 // registerRoutes attaches middleware and HTTP handlers to the mux router.
 // It is split into its own file for clarity and to keep app.go focused on
@@ -20,4 +24,7 @@ func (a *App) registerRoutes() {
 	a.router.HandleFunc("/runs", a.listRunsHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}/events", a.runEventsHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}", a.runDetailHandler).Methods(http.MethodGet)
+	a.router.Handle("/app", ui.IndexHandler()).Methods(http.MethodGet)
+	a.router.Handle("/app/", ui.IndexHandler()).Methods(http.MethodGet)
+	a.router.PathPrefix("/app/static/").Handler(http.StripPrefix("/app/static/", ui.StaticHandler())).Methods(http.MethodGet)
 }
