@@ -223,6 +223,55 @@ func TestHandlers_RunDetailEventCap(t *testing.T) {
 	require.True(t, resp.EventsTruncated)
 }
 
+func TestHandlers_RunEvents(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+
+	run := storage.TaskRun{
+		ID:        "run-1",
+		BatchID:   "b1",
+		SessionID: "s1",
+		Status:    storage.TaskRunStatusRunning,
+		StartedAt: time.Now().UTC(),
+	}
+	st.runs[run.ID] = run
+	st.events["s1"] = []storage.SessionEvent{
+		{SessionID: "s1", Event: map[string]any{"n": 1}},
+		{SessionID: "s1", Event: map[string]any{"n": 2}},
+		{SessionID: "s1", Event: map[string]any{"n": 3}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/events?limit=2", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Events          []any `json:"events"`
+		Count           int   `json:"count"`
+		EventsTruncated bool  `json:"events_truncated"`
+		EventLimitUsed  int   `json:"event_limit_used"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Events, 2)
+	require.Equal(t, 2, resp.Count)
+	require.True(t, resp.EventsTruncated)
+	require.Equal(t, 2, resp.EventLimitUsed)
+}
+
+func TestHandlers_RunEvents_NotFound(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodGet, "/runs/does-not-exist/events", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestHandlers_BatchProgress(t *testing.T) {
 	st := newHandlerTestStorage()
 	q := &handlerTestQueue{}
