@@ -96,3 +96,15 @@ curl "http://localhost:8080/runs?batch_id=batch-1700000000000000000&limit=25"
 ```bash
 curl "http://localhost:8080/runs/run-123?event_limit=100"
 ```
+
+### GET /runs/{id}/events
+- Optional `limit` caps returned session events (default 50, max 200). Response includes `events_truncated` and `event_limit_used` to signal whether the list was truncated.
+```bash
+curl "http://localhost:8080/runs/run-123/events?limit=100"
+```
+
+## App UI (/app)
+
+- Serve the embedded HTML/JS UI at `/app`; no build step is required.
+- `/app` lists batches; `/app?batch=<batch_id>` lists runs for that batch; `/app?run=<run_id>` shows raw events using `/runs/{id}/events`.
+- Static assets are served from `/app/static/*` with content types set automatically.
