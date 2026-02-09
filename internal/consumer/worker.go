@@ -123,10 +123,6 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		w.logger.Warn("list task runs", zap.Error(err), zap.String("batch_id", item.BatchID))
 	}
 
-	runRef := item.TaskRef
-	epicRef := ""
-	prompt := fmt.Sprintf("Work on task %s", runRef)
-
 	isEpic, err := w.tracker.IsEpic(ctx, item.TaskRef)
 	if err != nil {
 		_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
@@ -134,7 +130,17 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		return fmt.Errorf("tracker is-epic: %w", err)
 	}
 
-	if isEpic {
+	if !isEpic {
+		status, finalErr := w.executeTaskRun(ctx, batch, item.TaskRef, "", fmt.Sprintf("Work on task %s", item.TaskRef))
+		if status == storage.TaskRunStatusSucceeded {
+			w.setBatchStatus(ctx, batch, storage.BatchStatusIdle)
+			return nil
+		}
+
+		return finalErr
+	}
+
+	for {
 		children, err := w.tracker.ListChildren(ctx, item.TaskRef)
 		if err != nil {
 			_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
@@ -150,11 +156,16 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 			return nil
 		}
 
-		runRef = child
-		epicRef = item.TaskRef
-		prompt = fmt.Sprintf("Pick first ready task from epic %s and execute", epicRef)
-	}
+		status, finalErr := w.executeTaskRun(ctx, batch, child, item.TaskRef, fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef))
+		runs = append(runs, storage.TaskRun{TaskRef: child})
 
+		if status != storage.TaskRunStatusSucceeded {
+			return finalErr
+		}
+	}
+}
+
+func (w *Worker) executeTaskRun(ctx context.Context, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error) {
 	runID := w.newRunID()
 
 	sessionID, events, stop, err := w.copilot.StartSession(ctx, prompt, w.repoPath)
@@ -176,7 +187,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 
 		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
 		_ = w.notifier.NotifyError(ctx, batch.ID, runID, runRef, err)
-		return fmt.Errorf("start copilot session: %w", err)
+		return storage.TaskRunStatusFailed, fmt.Errorf("start copilot session: %w", err)
 	}
 	defer stop()
 
@@ -193,7 +204,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 	if err := w.storage.CreateTaskRun(ctx, &run); err != nil {
 		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
 		_ = w.notifier.NotifyError(ctx, batch.ID, runID, runRef, err)
-		return fmt.Errorf("create task run: %w", err)
+		return storage.TaskRunStatusFailed, fmt.Errorf("create task run: %w", err)
 	}
 
 	status := storage.TaskRunStatusSucceeded
@@ -243,7 +254,6 @@ eventLoop:
 	switch status {
 	case storage.TaskRunStatusSucceeded:
 		_ = w.notifier.NotifyTaskFinished(ctx, batch.ID, run.ID, run.TaskRef, string(run.Status), "")
-		w.setBatchStatus(ctx, batch, storage.BatchStatusIdle)
 	case storage.TaskRunStatusStopped:
 		_ = w.notifier.NotifyBatchIdle(ctx, batch.ID)
 		w.setBatchStatus(ctx, batch, storage.BatchStatusIdle)
@@ -255,7 +265,7 @@ eventLoop:
 		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
 	}
 
-	return finalErr
+	return status, finalErr
 }
 
 func (w *Worker) setBatchStatus(ctx context.Context, batch *storage.Batch, status storage.BatchStatus) {

@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -107,7 +108,12 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	nt := &fakeNotifier{}
 
 	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
-	w.newRunID = func() string { return "run-2" }
+	nextID := 2
+	w.newRunID = func() string {
+		id := fmt.Sprintf("run-%d", nextID)
+		nextID++
+		return id
+	}
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 13, 0, 0, 0, time.UTC) }
 
 	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
@@ -115,10 +121,16 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 
 	require.Equal(t, "Pick first ready task from epic epic-1 and execute", cp.prompt)
 
-	run := st.runs["run-2"]
-	require.Equal(t, "child-2", run.TaskRef)
-	require.Equal(t, "epic-1", run.EpicRef)
-	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
+	run1 := st.runs["run-2"]
+	require.Equal(t, "child-2", run1.TaskRef)
+	require.Equal(t, "epic-1", run1.EpicRef)
+	require.Equal(t, storage.TaskRunStatusSucceeded, run1.Status)
+
+	run2 := st.runs["run-3"]
+	require.Equal(t, "child-3", run2.TaskRef)
+	require.Equal(t, "epic-1", run2.EpicRef)
+	require.Equal(t, storage.TaskRunStatusSucceeded, run2.Status)
+	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 }
 
 func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
