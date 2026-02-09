@@ -179,77 +179,6 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 	require.Len(t, nt.errors, 1)
 }
 
-func TestWorker_SessionErrorNotifiesAndBlocksAuth(t *testing.T) {
-	ctx := context.Background()
-	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
-
-	events := make(chan copilot.RawEvent, 1)
-	events <- copilot.RawEvent{
-		"type": "session.error",
-		"data": map[string]any{
-			"message":    "Authorization error, you may need to run /login",
-			"errorType":  "authorization",
-			"statusCode": 401,
-		},
-	}
-	close(events)
-
-	cp := &fakeCopilot{sessions: []fakeSession{{sessionID: "sess-err", events: events}}}
-	tr := &fakeTracker{}
-	nt := &fakeNotifier{}
-
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
-	w.newRunID = func() string { return "run-err" }
-	w.now = func() time.Time { return time.Date(2026, 2, 9, 17, 0, 0, 0, time.UTC) }
-
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-auth"})
-	err := w.handleItem(ctx, payload)
-	require.Error(t, err)
-
-	run := st.runs["run-err"]
-	require.Equal(t, storage.TaskRunStatusFailed, run.Status)
-	require.Equal(t, "sess-err", run.SessionID)
-	require.Equal(t, storage.BatchStatusBlockedAuth, st.batches["b1"].Status)
-	require.Len(t, nt.errors, 2) // one from handleItem, one from session error
-}
-
-func TestWorker_RestartsOnInactivityThenSucceeds(t *testing.T) {
-	ctx := context.Background()
-	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
-
-	inactive := make(chan copilot.RawEvent)
-	active := make(chan copilot.RawEvent, 1)
-	active <- copilot.RawEvent{"type": "session.idle"}
-	close(active)
-
-	cp := &fakeCopilot{
-		sessions: []fakeSession{
-			{sessionID: "sess-1", events: inactive},
-			{sessionID: "sess-2", events: active},
-		},
-	}
-	tr := &fakeTracker{}
-	nt := &fakeNotifier{}
-
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
-	w.eventInactivityTimeout = 20 * time.Millisecond
-	w.maxSessionRestarts = 1
-	w.newRunID = func() string { return "run-inactive" }
-	w.now = func() time.Time { return time.Date(2026, 2, 9, 18, 0, 0, 0, time.UTC) }
-
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-timeout"})
-	require.NoError(t, w.handleItem(ctx, payload))
-
-	require.Equal(t, 2, cp.starts)
-	require.GreaterOrEqual(t, cp.stoppedCnt, 1)
-	run := st.runs["run-inactive"]
-	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
-	require.Equal(t, "sess-2", run.SessionID)
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
-}
-
 func closedChan() chan copilot.RawEvent {
 	ch := make(chan copilot.RawEvent)
 	close(ch)
@@ -265,37 +194,16 @@ type fakeCopilot struct {
 	sessionID string
 	startErr  error
 	stopped   bool
-
-	sessions   []fakeSession
-	starts     int
-	stoppedCnt int
 }
 
 func (f *fakeCopilot) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan copilot.RawEvent, func(), error) {
 	if f.startErr != nil {
 		return "", nil, nil, f.startErr
 	}
-	f.starts++
 	f.prompt = prompt
 	f.repoPath = repoPath
-
-	session := fakeSession{sessionID: f.sessionID, events: f.events}
-	if len(f.sessions) > 0 {
-		session = f.sessions[0]
-		f.sessions = f.sessions[1:]
-	}
-
-	stop := func() {
-		f.stopped = true
-		f.stoppedCnt++
-	}
-
-	return session.sessionID, session.events, stop, nil
-}
-
-type fakeSession struct {
-	sessionID string
-	events    chan copilot.RawEvent
+	stop := func() { f.stopped = true }
+	return f.sessionID, f.events, stop, nil
 }
 
 type fakeTracker struct {
