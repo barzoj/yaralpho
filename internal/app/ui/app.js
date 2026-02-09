@@ -51,6 +51,7 @@
     "pending_messages.modified": {
       emoji: "⏳",
       label: "Pending messages updated",
+      render: renderPendingMessage,
     },
     "session.compaction_complete": {
       emoji: "🧹",
@@ -110,7 +111,7 @@
     "system.message": {
       emoji: "🛡️",
       label: "System message",
-      summary: (data) => data?.content || data?.transformedContent,
+      render: renderSystemMessage,
     },
     "tool.execution_complete": {
       emoji: "🛠️",
@@ -136,7 +137,7 @@
     "user.message": {
       emoji: "🧑",
       label: "User message",
-      summary: (data) => data?.content || data?.transformedContent,
+      render: renderUserMessage,
     },
   };
 
@@ -276,6 +277,10 @@
     return (events || []).filter(shouldRenderEvent);
   }
 
+  function getEventData(evt) {
+    return (evt && (evt.event?.data || evt.data)) || {};
+  }
+
   function formatUsageSummary(data) {
     if (!data) return "";
     const parts = [];
@@ -322,6 +327,54 @@
       parts.push(data.arguments.slice(0, 80));
     }
     return parts.join(" ").trim();
+  }
+
+  function buildEventContent(evt, meta) {
+    if (typeof meta.render === "function") {
+      return meta.render(evt);
+    }
+
+    const summary = formatEventSummary(evt, meta);
+    if (summary) {
+      const summaryEl = document.createElement("div");
+      summaryEl.className = "event-summary";
+      summaryEl.textContent = summary;
+      return summaryEl;
+    }
+    return null;
+  }
+
+  function resolveMessageText(data) {
+    return data?.content || data?.transformedContent || "";
+  }
+
+  function createChatBubble(text, variant, fallbackText = "(no content)") {
+    const bubble = document.createElement("div");
+    bubble.className = ["chat-bubble", variant].filter(Boolean).join(" ");
+    bubble.textContent = text?.trim() || fallbackText;
+    return bubble;
+  }
+
+  function renderUserMessage(evt) {
+    const data = getEventData(evt);
+    return createChatBubble(resolveMessageText(data), "chat-user");
+  }
+
+  function renderSystemMessage(evt) {
+    const data = getEventData(evt);
+    return createChatBubble(
+      resolveMessageText(data),
+      "chat-system",
+      "(system message not provided)"
+    );
+  }
+
+  function renderPendingMessage() {
+    return createChatBubble(
+      "",
+      "chat-pending",
+      "Pending messages updated"
+    );
   }
 
   function formatEventSummary(evt, meta) {
@@ -511,12 +564,10 @@
       header.appendChild(metaRow);
       body.appendChild(header);
 
-      const summary = formatEventSummary(evt, meta);
-      if (summary) {
-        const summaryEl = document.createElement("div");
-        summaryEl.className = "event-summary";
-        summaryEl.textContent = summary;
-        body.appendChild(summaryEl);
+      const contentNode = buildEventContent(evt, meta);
+      if (contentNode) {
+        contentNode.classList.add("event-content");
+        body.appendChild(contentNode);
       }
 
       const pre = document.createElement("pre");
