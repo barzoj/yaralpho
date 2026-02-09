@@ -21,14 +21,13 @@
     "assistant.message": {
       emoji: "🤖",
       label: "Assistant message",
-      summary: (data) =>
-        data?.content || (data?.encryptedContent ? "Encrypted message" : ""),
+      render: renderAssistantMessage,
     },
     "assistant.message_delta": { hidden: true },
     "assistant.reasoning": {
       emoji: "🧠",
       label: "Assistant reasoning",
-      summary: (data) => data?.content || data?.reasoningText,
+      render: renderAssistantReasoning,
     },
     "assistant.reasoning_delta": { hidden: true },
     "assistant.turn_end": {
@@ -345,7 +344,17 @@
   }
 
   function resolveMessageText(data) {
-    return data?.content || data?.transformedContent || "";
+    const raw = data?.content ?? data?.transformedContent;
+    if (Array.isArray(raw)) {
+      return raw
+        .map((part) => {
+          if (typeof part === "string") return part;
+          if (part && typeof part.text === "string") return part.text;
+          return "";
+        })
+        .join("");
+    }
+    return raw || "";
   }
 
   function createChatBubble(text, variant, fallbackText = "(no content)") {
@@ -380,6 +389,22 @@
   function renderAssistantIntent(evt) {
     const data = getEventData(evt);
     return createChatBubble(data?.intent, "chat-intent", "(intent not provided)");
+  }
+
+  function renderAssistantReasoning(evt) {
+    const data = getEventData(evt);
+    const text = data?.content || data?.reasoningText;
+    return createChatBubble(text, "chat-assistant", "(reasoning not provided)");
+  }
+
+  function renderAssistantMessage(evt) {
+    const data = getEventData(evt);
+    const text = resolveMessageText(data);
+    const fallback =
+      data?.encryptedContent
+        ? "Encrypted message (content not available)"
+        : "(no content)";
+    return createChatBubble(text, "chat-assistant", fallback);
   }
 
   function renderTurnMarker(evt, label) {
