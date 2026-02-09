@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -42,6 +43,7 @@ func NewGitHub(logger *zap.Logger) *GitHub {
 // path. A buffered channel of RawEvent values is returned alongside a stop
 // function that tears down the SDK resources.
 func (g *GitHub) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan RawEvent, func(), error) {
+	g.logger.Debug("starting copilot session", zap.String("repo_path", repoPath))
 	token, tokenKey := selectToken()
 	if token == "" {
 		err := fmt.Errorf("missing GitHub Copilot token (checked COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN)")
@@ -53,16 +55,16 @@ func (g *GitHub) StartSession(ctx context.Context, prompt, repoPath string) (str
 		GithubToken:     token,
 		Cwd:             repoPath,
 		UseLoggedInUser: githubcopilot.Bool(false),
+		LogLevel:        "debug",
 	}
 
+	g.logger.Debug("creating copilot client", zap.Any("options", opts))
+
 	client := g.newClient(opts)
-	if err := client.Start(ctx); err != nil {
-		g.logger.Error("start copilot client", zap.String("env_key", tokenKey), zap.Error(err))
-		return "", nil, nil, fmt.Errorf("start copilot client: %w", err)
-	}
 
 	session, err := client.CreateSession(ctx, &githubcopilot.SessionConfig{
 		OnPermissionRequest: approvePermission,
+		Model:               "gpt-5.1-codex-max",
 		WorkingDirectory:    repoPath,
 		Streaming:           true,
 	})
@@ -72,11 +74,14 @@ func (g *GitHub) StartSession(ctx context.Context, prompt, repoPath string) (str
 		return "", nil, nil, fmt.Errorf("create copilot session: %w", err)
 	}
 
+	g.logger.Debug("copilot session created", zap.String("session_id", session.ID()), zap.String("repo_path", repoPath))
+
 	events := make(chan RawEvent, eventBufferSize)
 	handlerCtx, cancel := context.WithCancel(context.Background())
 
 	unsubscribe := session.On(func(event githubcopilot.SessionEvent) {
 		raw, err := encodeRawEvent(event)
+		g.logger.Debug("copilot session event", zap.String("session_id", session.ID()), zap.Any("event", raw), zap.Error(err))
 		if err != nil {
 			g.logger.Warn("marshal copilot event", zap.String("session_id", session.ID()), zap.Error(err))
 			return
@@ -138,6 +143,31 @@ func selectToken() (string, string) {
 	return "", ""
 }
 
+// resolveCLIPath selects the Copilot CLI executable to use.
+// Preference order: explicit env override, `github-copilot-cli` on PATH, `copilot` on PATH, default name.
+func resolveCLIPath(logger *zap.Logger) string {
+	if explicit := strings.TrimSpace(os.Getenv("COPILOT_CLI_PATH")); explicit != "" {
+		return explicit
+	}
+
+	if path, err := exec.LookPath("github-copilot-cli"); err == nil {
+		if logger != nil {
+			logger.Info("using github-copilot-cli for copilot CLI", zap.String("path", path))
+		}
+		return path
+	}
+
+	if path, err := exec.LookPath("copilot"); err == nil {
+		return path
+	}
+
+	if logger != nil {
+		logger.Warn("copilot CLI not found on PATH; using default name", zap.String("default", "copilot"))
+	}
+
+	return "copilot"
+}
+
 func encodeRawEvent(event githubcopilot.SessionEvent) (RawEvent, error) {
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -153,7 +183,6 @@ func encodeRawEvent(event githubcopilot.SessionEvent) (RawEvent, error) {
 }
 
 type copilotClient interface {
-	Start(ctx context.Context) error
 	Stop() error
 	CreateSession(ctx context.Context, config *githubcopilot.SessionConfig) (copilotSession, error)
 }
@@ -167,10 +196,6 @@ type copilotSession interface {
 
 type sdkClient struct {
 	inner *githubcopilot.Client
-}
-
-func (c *sdkClient) Start(ctx context.Context) error {
-	return c.inner.Start(ctx)
 }
 
 func (c *sdkClient) Stop() error {

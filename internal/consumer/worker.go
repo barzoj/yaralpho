@@ -224,6 +224,11 @@ eventLoop:
 				w.logger.Error("insert session event", zap.Error(err), zap.String("run_id", run.ID))
 				break eventLoop
 			}
+
+			if isSessionIdleEvent(evt) {
+				w.logger.Debug("copilot session idle event received; stopping run", zap.String("run_id", run.ID), zap.String("session_id", sessionID))
+				break eventLoop
+			}
 		}
 	}
 
@@ -264,6 +269,20 @@ func (w *Worker) setBatchStatus(ctx context.Context, batch *storage.Batch, statu
 	if err := w.storage.UpdateBatch(ctx, batch); err != nil {
 		w.logger.Error("update batch status", zap.Error(err), zap.String("batch_id", batch.ID))
 	}
+}
+
+func isSessionIdleEvent(evt copilot.RawEvent) bool {
+	val, ok := evt["type"]
+	if !ok {
+		return false
+	}
+
+	eventType, ok := val.(string)
+	if !ok {
+		return false
+	}
+
+	return strings.EqualFold(eventType, "session.idle")
 }
 
 func firstAvailableChild(children []string, runs []storage.TaskRun) (string, bool) {

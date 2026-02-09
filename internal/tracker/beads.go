@@ -3,7 +3,9 @@ package tracker
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -40,6 +42,19 @@ func NewBeads(cfg config.Config, logger *zap.Logger) (*Beads, error) {
 	repoPath = strings.TrimSpace(repoPath)
 	if repoPath == "" {
 		return nil, fmt.Errorf("bd repo is empty")
+	}
+
+	repoPath, err = filepath.Abs(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("bd repo abs: %w", err)
+	}
+
+	info, err := os.Stat(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("bd repo: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("bd repo is not a directory: %s", repoPath)
 	}
 
 	if logger == nil {

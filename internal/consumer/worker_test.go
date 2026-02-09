@@ -55,6 +55,38 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[0])
 }
 
+func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+
+	events := make(chan copilot.RawEvent, 1)
+	events <- copilot.RawEvent{"type": "session.idle", "id": "ev-1"}
+
+	cp := &fakeCopilot{
+		events:    events,
+		sessionID: "s-idle",
+	}
+
+	tr := &fakeTracker{}
+	nt := &fakeNotifier{}
+
+	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
+	w.newRunID = func() string { return "run-idle" }
+	now := time.Date(2026, 2, 8, 15, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return now }
+
+	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-idle"})
+	require.NoError(t, w.handleItem(ctx, payload))
+
+	run := st.runs["run-idle"]
+	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
+	require.Equal(t, "s-idle", run.SessionID)
+	require.Len(t, st.sessionEvents, 1)
+	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.True(t, cp.stopped)
+}
+
 func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	ctx := context.Background()
 	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}

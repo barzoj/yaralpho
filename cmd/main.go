@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/barzoj/yaralpho/internal/app"
@@ -15,10 +16,28 @@ import (
 
 func main() {
 	var configPath string
+	var logLevel string
 	flag.StringVar(&configPath, "config", "", "optional path to config JSON file")
+	flag.StringVar(&logLevel, "debug-level", "info", "log verbosity: info (default), warn, debug")
 	flag.Parse()
 
-	logger, err := zap.NewProduction()
+	levelText := strings.ToLower(strings.TrimSpace(logLevel))
+	switch levelText {
+	case "", "info":
+		levelText = "info"
+	case "warn", "debug":
+	default:
+		fmt.Fprintf(os.Stderr, "invalid debug-level %q (allowed: info, warn, debug)\n", logLevel)
+		os.Exit(2)
+	}
+
+	zapConfig := zap.NewProductionConfig()
+	if err := zapConfig.Level.UnmarshalText([]byte(levelText)); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse debug-level %q: %v\n", logLevel, err)
+		os.Exit(2)
+	}
+
+	logger, err := zapConfig.Build()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to build logger: %v\n", err)
 		os.Exit(1)

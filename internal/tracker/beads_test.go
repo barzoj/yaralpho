@@ -3,6 +3,7 @@ package tracker
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,14 +21,24 @@ func (c stubConfig) Get(key string) (string, error) {
 }
 
 func TestBeadsNewUsesRepoFromConfig(t *testing.T) {
-	cfg := stubConfig{"YARALPHO_BD_REPO": "/tmp/repo"}
+	repoDir := t.TempDir()
+	cfg := stubConfig{"YARALPHO_BD_REPO": repoDir}
 
 	b, err := NewBeads(cfg, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if b.repoPath != "/tmp/repo" {
-		t.Fatalf("repoPath = %q, want %q", b.repoPath, "/tmp/repo")
+	if b.repoPath != repoDir {
+		t.Fatalf("repoPath = %q, want %q", b.repoPath, repoDir)
+	}
+}
+
+func TestBeadsNewErrorsWhenRepoDirMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	cfg := stubConfig{"YARALPHO_BD_REPO": missing}
+
+	if _, err := NewBeads(cfg, nil); err == nil {
+		t.Fatalf("expected error for missing repo directory")
 	}
 }
 

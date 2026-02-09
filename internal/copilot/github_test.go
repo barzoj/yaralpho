@@ -2,6 +2,8 @@ package copilot
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -30,7 +32,6 @@ func TestGitHubStartSessionUsesTokenPrecedence(t *testing.T) {
 	require.Equal(t, fakeSession.id, sessionID)
 	require.NotNil(t, events)
 	require.NotNil(t, stop)
-	require.True(t, fakeClient.started)
 	require.False(t, fakeClient.stopped)
 
 	require.Equal(t, "primary", fakeClient.opts.GithubToken)
@@ -40,6 +41,7 @@ func TestGitHubStartSessionUsesTokenPrecedence(t *testing.T) {
 
 	require.NotNil(t, fakeClient.sessionConfig.OnPermissionRequest)
 	require.True(t, fakeClient.sessionConfig.Streaming)
+	require.Equal(t, "gpt-5.1-codex-max", fakeClient.sessionConfig.Model)
 	require.Equal(t, repoPath, fakeClient.sessionConfig.WorkingDirectory)
 	require.Equal(t, "hello", fakeSession.sentPrompt)
 
@@ -123,21 +125,50 @@ func TestGitHubForwardsEventsAndStopCloses(t *testing.T) {
 	fakeSession.emit(event)
 }
 
+func TestResolveCLIPathEnvOverride(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	override := "/custom/copilot"
+	t.Setenv("COPILOT_CLI_PATH", override)
+	t.Setenv("PATH", "")
+
+	path := resolveCLIPath(logger)
+	require.Equal(t, override, path)
+}
+
+func TestResolveCLIPathPrefersGithubCopilotCliWhenBothPresent(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	dir := t.TempDir()
+	fallbackPath := filepath.Join(dir, "github-copilot-cli")
+	createDummyExecutable(t, fallbackPath)
+	copilotPath := filepath.Join(dir, "copilot")
+	createDummyExecutable(t, copilotPath)
+	t.Setenv("PATH", dir)
+	t.Setenv("COPILOT_CLI_PATH", "")
+
+	path := resolveCLIPath(logger)
+	require.Equal(t, fallbackPath, path)
+}
+
+func TestResolveCLIPathUsesCopilotWhenOnlyAliasExists(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	dir := t.TempDir()
+	copilotPath := filepath.Join(dir, "copilot")
+	createDummyExecutable(t, copilotPath)
+	t.Setenv("PATH", dir)
+	t.Setenv("COPILOT_CLI_PATH", "")
+
+	path := resolveCLIPath(logger)
+	require.Equal(t, copilotPath, path)
+}
+
 // --- fakes ---
 
 type fakeClient struct {
 	opts          *githubcopilot.ClientOptions
 	session       *fakeSession
-	started       bool
 	stopped       bool
-	startErr      error
 	createErr     error
 	sessionConfig *githubcopilot.SessionConfig
-}
-
-func (f *fakeClient) Start(context.Context) error {
-	f.started = true
-	return f.startErr
 }
 
 func (f *fakeClient) Stop() error {
@@ -200,4 +231,10 @@ func (s *fakeSession) emit(event githubcopilot.SessionEvent) {
 	for _, h := range handlers {
 		h(event)
 	}
+}
+
+func createDummyExecutable(t *testing.T, path string) {
+	t.Helper()
+	content := []byte("#!/bin/sh\nexit 0\n")
+	require.NoError(t, os.WriteFile(path, content, 0o755))
 }
