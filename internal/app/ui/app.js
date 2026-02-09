@@ -34,12 +34,12 @@
     "assistant.turn_end": {
       emoji: "🔚",
       label: "Turn end",
-      summary: (data) => (data?.turnId ? `Turn ${data.turnId}` : ""),
+      render: (evt) => renderTurnMarker(evt, "Turn end"),
     },
     "assistant.turn_start": {
       emoji: "🔜",
       label: "Turn start",
-      summary: (data) => (data?.turnId ? `Turn ${data.turnId}` : ""),
+      render: (evt) => renderTurnMarker(evt, "Turn start"),
     },
     "assistant.usage": {
       emoji: "📊",
@@ -380,6 +380,16 @@
   function renderAssistantIntent(evt) {
     const data = getEventData(evt);
     return createChatBubble(data?.intent, "chat-intent", "(intent not provided)");
+  }
+
+  function renderTurnMarker(evt, label) {
+    const data = getEventData(evt);
+    const turnId = data?.turnId;
+    const parts = [label];
+    if (turnId !== undefined && turnId !== null && String(turnId).trim() !== "") {
+      parts.push(`Turn ${turnId}`);
+    }
+    return createChatBubble(parts.join(" • "), "chat-system", label);
   }
 
   function formatEventSummary(evt, meta) {
