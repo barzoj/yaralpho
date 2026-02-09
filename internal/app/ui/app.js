@@ -43,7 +43,7 @@
     "assistant.usage": {
       emoji: "📊",
       label: "Usage",
-      summary: (data) => formatUsageSummary(data),
+      render: renderAssistantUsage,
     },
     "hook.end": { emoji: "🪝", label: "Hook end" },
     "hook.start": { emoji: "🪝", label: "Hook start" },
@@ -83,7 +83,7 @@
     "session.usage_info": {
       emoji: "📈",
       label: "Usage info",
-      summary: (data) => formatUsageInfoSummary(data),
+      render: renderSessionUsageInfo,
     },
     "skill.invoked": {
       emoji: "📦",
@@ -364,6 +364,41 @@
     return bubble;
   }
 
+  function createMetricChip(label, value) {
+    if (value === null || value === undefined || value === "") return null;
+    const chip = document.createElement("span");
+    chip.className = "pill";
+    chip.textContent = `${label}: ${value}`;
+    return chip;
+  }
+
+  function renderMetricsRow(chips, fallbackText) {
+    const row = document.createElement("div");
+    row.className = "event-content event-meta";
+    const validChips = chips.filter(Boolean);
+    if (!validChips.length) {
+      row.textContent = fallbackText;
+      row.classList.add("event-summary");
+      return row;
+    }
+    validChips.forEach((chip) => row.appendChild(chip));
+    return row;
+  }
+
+  function formatNumber(value) {
+    return Number.isFinite(value) ? value.toLocaleString() : null;
+  }
+
+  function formatCurrency(value) {
+    return Number.isFinite(value) ? `$${value.toFixed(4)}` : null;
+  }
+
+  function formatDurationMs(value) {
+    if (!Number.isFinite(value)) return null;
+    if (value >= 1000) return `${(value / 1000).toFixed(2)}s`;
+    return `${value}ms`;
+  }
+
   function renderUserMessage(evt) {
     const data = getEventData(evt);
     return createChatBubble(resolveMessageText(data), "chat-user");
@@ -415,6 +450,29 @@
       parts.push(`Turn ${turnId}`);
     }
     return createChatBubble(parts.join(" • "), "chat-system", label);
+  }
+
+  function renderAssistantUsage(evt) {
+    const data = getEventData(evt);
+    const chips = [
+      createMetricChip("Input", formatNumber(data?.inputTokens)),
+      createMetricChip("Output", formatNumber(data?.outputTokens)),
+      createMetricChip("Cache read", formatNumber(data?.cacheReadTokens)),
+      createMetricChip("Cache write", formatNumber(data?.cacheWriteTokens)),
+      createMetricChip("Cost", formatCurrency(data?.cost)),
+      createMetricChip("Duration", formatDurationMs(data?.duration)),
+    ];
+    return renderMetricsRow(chips, "No usage metrics provided");
+  }
+
+  function renderSessionUsageInfo(evt) {
+    const data = getEventData(evt);
+    const chips = [
+      createMetricChip("Current", formatNumber(data?.currentTokens)),
+      createMetricChip("Limit", formatNumber(data?.tokenLimit)),
+      createMetricChip("Messages", formatNumber(data?.messagesLength)),
+    ];
+    return renderMetricsRow(chips, "No usage info provided");
   }
 
   function formatEventSummary(evt, meta) {
