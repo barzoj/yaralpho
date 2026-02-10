@@ -11,6 +11,7 @@ import (
 
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
+	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
@@ -127,6 +128,8 @@ func (noopTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Com
 }
 
 type noopNotifier struct{}
+
+func (noopNotifier) NotifyEvent(ctx context.Context, event notify.Event) error { return nil }
 
 func (noopNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
 	return nil

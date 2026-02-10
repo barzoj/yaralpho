@@ -55,28 +55,48 @@ type slackPayload struct {
 	BatchID    string `json:"batch_id"`
 	RunID      string `json:"run_id,omitempty"`
 	TaskRef    string `json:"task_ref,omitempty"`
+	ParentTask string `json:"parent_task_ref,omitempty"`
 	Status     string `json:"status,omitempty"`
+	Details    string `json:"details,omitempty"`
+	Attempt    int    `json:"attempt,omitempty"`
+	MaxAttempt int    `json:"max_attempt,omitempty"`
 	CommitHash string `json:"commit_hash,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
 
-func (s *Slack) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
+func (s *Slack) NotifyEvent(ctx context.Context, event Event) error {
+	text := s.textForEvent(event)
 	return s.post(ctx, slackPayload{
-		Text:       fmt.Sprintf("Task %s finished with status %s", taskRef, status),
+		Text:       text,
+		Type:       event.Type,
+		BatchID:    event.BatchID,
+		RunID:      event.RunID,
+		TaskRef:    event.TaskRef,
+		ParentTask: event.ParentTaskRef,
+		Status:     event.Status,
+		Details:    event.Details,
+		Attempt:    event.Attempt,
+		MaxAttempt: event.MaxAttempts,
+		CommitHash: strings.TrimSpace(event.CommitHash),
+	})
+}
+
+func (s *Slack) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
+	return s.NotifyEvent(ctx, Event{
 		Type:       "task_finished",
 		BatchID:    batchID,
 		RunID:      runID,
 		TaskRef:    taskRef,
 		Status:     status,
-		CommitHash: strings.TrimSpace(commitHash),
+		CommitHash: commitHash,
 	})
 }
 
 func (s *Slack) NotifyBatchIdle(ctx context.Context, batchID string) error {
-	return s.post(ctx, slackPayload{
-		Text:    fmt.Sprintf("Batch %s is idle", batchID),
+	return s.NotifyEvent(ctx, Event{
 		Type:    "batch_idle",
 		BatchID: batchID,
+		Status:  "idle",
 	})
 }
 
@@ -85,13 +105,13 @@ func (s *Slack) NotifyError(ctx context.Context, batchID, runID, taskRef string,
 	if err != nil {
 		msg = err.Error()
 	}
-	return s.post(ctx, slackPayload{
-		Text:    fmt.Sprintf("Error in task %s: %s", taskRef, msg),
+	return s.NotifyEvent(ctx, Event{
 		Type:    "error",
 		BatchID: batchID,
 		RunID:   runID,
 		TaskRef: taskRef,
-		Error:   msg,
+		Status:  "error",
+		Details: msg,
 	})
 }
 
@@ -129,4 +149,37 @@ func (s *Slack) post(ctx context.Context, payload slackPayload) error {
 	}
 
 	return nil
+}
+
+func (s *Slack) textForEvent(event Event) string {
+	parts := []string{}
+	if event.Type != "" {
+		parts = append(parts, fmt.Sprintf("[%s]", event.Type))
+	}
+	if event.BatchID != "" {
+		parts = append(parts, fmt.Sprintf("batch=%s", event.BatchID))
+	}
+	if event.TaskRef != "" {
+		parts = append(parts, fmt.Sprintf("task=%s", event.TaskRef))
+	}
+	if event.ParentTaskRef != "" {
+		parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
+	}
+	if event.Status != "" {
+		parts = append(parts, fmt.Sprintf("status=%s", event.Status))
+	}
+	if event.Attempt > 0 {
+		segment := fmt.Sprintf("attempt=%d", event.Attempt)
+		if event.MaxAttempts > 0 {
+			segment = fmt.Sprintf("attempt=%d/%d", event.Attempt, event.MaxAttempts)
+		}
+		parts = append(parts, segment)
+	}
+	if event.Details != "" {
+		parts = append(parts, fmt.Sprintf("details=%s", event.Details))
+	}
+	if event.CommitHash != "" {
+		parts = append(parts, fmt.Sprintf("commit=%s", strings.TrimSpace(event.CommitHash)))
+	}
+	return strings.Join(parts, " | ")
 }

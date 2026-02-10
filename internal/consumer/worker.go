@@ -115,13 +115,15 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		return fmt.Errorf("queue item missing batch_id or task_ref")
 	}
 
+	w.notifyTaskEvent(ctx, notify.Event{Type: "task_received", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "pending"})
+
 	batch, err := w.storage.GetBatch(ctx, item.BatchID)
 	if err != nil {
 		_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
 		return fmt.Errorf("get batch %s: %w", item.BatchID, err)
 	}
 	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusRunning)
-	w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "task_started", "")
+	w.notifyTaskEvent(ctx, notify.Event{Type: "task_started", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "running"})
 
 	runs, err := w.storage.ListTaskRuns(ctx, item.BatchID)
 	if err != nil {
@@ -147,7 +149,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 	attempts := 0
 	for {
 		attempts++
-		w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "attempt_started", fmt.Sprintf("attempt=%d", attempts))
+		w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "in_progress", Attempt: attempts, Details: fmt.Sprintf("attempt=%d", attempts)})
 		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
 		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
 		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, "", execInstruction, verifyInstruction)
@@ -162,7 +164,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 		}
 
 		if verifyStatus == storage.TaskRunStatusSucceeded {
-			w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "verification_succeeded", fmt.Sprintf("attempt=%d", attempts))
+			w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "succeeded", Attempt: attempts, Details: fmt.Sprintf("attempt=%d", attempts)})
 			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
 			return nil
 		}
@@ -194,7 +196,7 @@ func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item Queu
 		runRecorded := false
 		for {
 			attempts++
-			w.notifyTaskEvent(ctx, item.BatchID, child, "attempt_started", fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef))
+			w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: child, ParentTaskRef: item.TaskRef, Status: "in_progress", Attempt: attempts, Details: fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef)})
 			execInstruction := fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef)
 			verifyInstruction := fmt.Sprintf("Verify task %s", child)
 			verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, child, item.TaskRef, execInstruction, verifyInstruction)
@@ -214,7 +216,7 @@ func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item Queu
 			}
 
 			if verifyStatus == storage.TaskRunStatusSucceeded {
-				w.notifyTaskEvent(ctx, item.BatchID, child, "verification_succeeded", fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef))
+				w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: child, ParentTaskRef: item.TaskRef, Status: "succeeded", Attempt: attempts, Details: fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef)})
 				break
 			}
 
@@ -257,7 +259,7 @@ func (w *Worker) shouldRetry(ctx context.Context, batch *storage.Batch, batchID,
 	}
 
 	info := fmt.Sprintf("attempt=%d reason=%s details=%s", attempts, agentResp.Reason, agentResp.Details)
-	w.notifyTaskEvent(ctx, batchID, taskRef, "verification_failed", info)
+	w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed", BatchID: batchID, TaskRef: taskRef, Status: "failed", Attempt: attempts, MaxAttempts: retries, Details: info})
 
 	if !hasRetries {
 		return false
@@ -266,27 +268,26 @@ func (w *Worker) shouldRetry(ctx context.Context, batch *storage.Batch, batchID,
 	if attempts >= retries {
 		w.logger.Info("max verification attempts reached; marking batch as failed", zap.String("batch_id", batchID), zap.Int("attempts", attempts), zap.Int("max_retries", retries))
 		setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
-		w.notifyTaskEvent(ctx, batchID, taskRef, "verification_failed_max_retries", info)
+		w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed_max_retries", BatchID: batchID, TaskRef: taskRef, Status: "failed", Attempt: attempts, MaxAttempts: retries, Details: info})
 		_ = w.notifier.NotifyError(ctx, batchID, "", taskRef, fmt.Errorf("verification failed after %d attempts: %s", attempts, agentResp.Reason))
 		return false
 	}
 
-	w.notifyTaskEvent(ctx, batchID, taskRef, "verification_failed_retrying", fmt.Sprintf("%s retry_in=%d", info, retries-attempts))
+	w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed_retrying", BatchID: batchID, TaskRef: taskRef, Status: "retrying", Attempt: attempts, MaxAttempts: retries, Details: fmt.Sprintf("%s retry_in=%d", info, retries-attempts)})
 	return true
 }
 
-func (w *Worker) notifyTaskEvent(ctx context.Context, batchID, taskRef, status, details string) {
+func (w *Worker) notifyTaskEvent(ctx context.Context, event notify.Event) {
 	if w.notifier == nil {
 		return
 	}
 
-	fullStatus := status
-	if strings.TrimSpace(details) != "" {
-		fullStatus = fmt.Sprintf("%s (%s)", status, details)
+	if event.Type == "" {
+		event.Type = "task_event"
 	}
 
-	if err := w.notifier.NotifyTaskFinished(ctx, batchID, "", taskRef, fullStatus, ""); err != nil {
-		w.logger.Warn("notify task event", zap.Error(err), zap.String("status", fullStatus), zap.String("batch_id", batchID), zap.String("task_ref", taskRef))
+	if err := w.notifier.NotifyEvent(ctx, event); err != nil {
+		w.logger.Warn("notify task event", zap.Error(err), zap.String("event_type", event.Type), zap.String("batch_id", event.BatchID), zap.String("task_ref", event.TaskRef))
 	}
 }
 

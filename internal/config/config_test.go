@@ -109,7 +109,7 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)
-	require.Equal(t, "TODO: execution task prompt", execPrompt)
+	require.Equal(t, strings.TrimSpace(defaultExecutionTaskPrompt), strings.TrimSpace(execPrompt))
 
 	verifyPrompt, err := cfg.Get(VerificationTaskPromptKey)
 	require.NoError(t, err)

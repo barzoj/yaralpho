@@ -9,6 +9,7 @@ import (
 
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
+	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
@@ -70,12 +71,15 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	require.Len(t, st.sessionEvents, 2)
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 
-	require.Len(t, nt.finished, 5)
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "task_started"}, nt.finished[0])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "attempt_started (attempt=1)"}, nt.finished[1])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[2])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[3])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "verification_succeeded (attempt=1)"}, nt.finished[4])
+	require.Len(t, nt.events, 4)
+	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-1", Status: "pending"}, nt.events[0])
+	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-1", Status: "running"}, nt.events[1])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-1", Status: "in_progress", Attempt: 1, Details: "attempt=1"}, nt.events[2])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-1", Status: "succeeded", Attempt: 1, Details: "attempt=1"}, nt.events[3])
+
+	require.Len(t, nt.finished, 2)
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[0])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[1])
 }
 
 func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
@@ -655,6 +659,7 @@ func (f *fakeStorage) GetBatchProgress(ctx context.Context, batchID string) (sto
 }
 
 type fakeNotifier struct {
+	events    []notify.Event
 	finished  []notifyFinished
 	batchIdle []string
 	errors    []notifyError
@@ -673,6 +678,11 @@ type notifyError struct {
 	runID   string
 	taskRef string
 	err     error
+}
+
+func (f *fakeNotifier) NotifyEvent(ctx context.Context, event notify.Event) error {
+	f.events = append(f.events, event)
+	return nil
 }
 
 func (f *fakeNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
