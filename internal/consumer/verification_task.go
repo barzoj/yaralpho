@@ -70,6 +70,9 @@ func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, ta
 	}
 
 	prompt := buildPrompt(basePrompt, t.instruction)
+	if strings.Contains(prompt, "%s") {
+		prompt = fmt.Sprintf(prompt, taskID)
+	}
 
 	return t.exec(ctx, t.executionTask.copilot, t.executionTask.storage, notifier, logger, repoPath, newRunID, now, batch, taskID, epicID, prompt)
 }

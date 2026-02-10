@@ -141,8 +141,37 @@ func executeTaskWithStructuredOutput(
 	epicRef,
 	prompt string,
 ) (storage.TaskRunStatus, string, error) {
-	status, err := executeTask(ctx, cp, st, nt, logger, repoPath, newRunID, now, batch, runRef, epicRef, prompt)
-	return status, "", err
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	// Capture the run ID up front so we can retrieve the persisted run and its session events after execution.
+	generatedRunID := newRunID()
+	status, err := executeTask(ctx, cp, st, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
+
+	structuredOutput := ""
+	if st == nil || generatedRunID == "" {
+		return status, structuredOutput, err
+	}
+
+	run, getRunErr := st.GetTaskRun(ctx, generatedRunID)
+	if getRunErr != nil {
+		logger.Debug("fetch task run for structured output", zap.Error(getRunErr), zap.String("run_id", generatedRunID))
+		return status, structuredOutput, err
+	}
+
+	if run.SessionID == "" {
+		return status, structuredOutput, err
+	}
+
+	events, listErr := st.ListSessionEvents(ctx, run.SessionID)
+	if listErr != nil {
+		logger.Debug("list session events for structured output", zap.Error(listErr), zap.String("session_id", run.SessionID), zap.String("run_id", generatedRunID))
+		return status, structuredOutput, err
+	}
+
+	structuredOutput = latestAssistantMessageContent(events)
+	return status, structuredOutput, err
 }
 
 func setBatchStatus(ctx context.Context, st storage.Storage, logger *zap.Logger, batch *storage.Batch, status storage.BatchStatus) {
@@ -156,4 +185,25 @@ func setBatchStatus(ctx context.Context, st storage.Storage, logger *zap.Logger,
 	if err := st.UpdateBatch(ctx, batch); err != nil {
 		logger.Error("update batch status", zap.Error(err), zap.String("batch_id", batch.ID))
 	}
+}
+
+func latestAssistantMessageContent(events []storage.SessionEvent) string {
+	for i := len(events) - 1; i >= 0; i-- {
+		eventType, ok := events[i].Event["type"].(string)
+		if !ok || eventType != "assistant.message" {
+			continue
+		}
+
+		data, ok := events[i].Event["data"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		content, ok := data["content"].(string)
+		if ok {
+			return content
+		}
+	}
+
+	return ""
 }

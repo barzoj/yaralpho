@@ -38,7 +38,45 @@ const (
 	defaultConfigPath             = "config.json"
 	defaultMaxRetries             = "5"
 	defaultExecutionTaskPrompt    = "TODO: execution task prompt"
-	defaultVerificationTaskPrompt = "TODO: verification task prompt"
+	defaultVerificationTaskPrompt = `
+	You are a verification agent. You are given the following task to verify work results of another coding agent:
+
+Task name: %s
+
+Follow these steps and return only one JSON object in your final assistant message:
+
+1) Run: git status --short
+   - If any tracked/untracked files are listed, set:
+     {
+       "status": "failure",
+       "reason": "working_tree_not_clean",
+       "details": "Brief list of files and changes (escape quotes/backslashes)"
+     }
+   - Stop after emitting this JSON.
+
+2) If clean:
+
+   - Get last commit info: git log -1 --oneline
+     * If no commits or the last commit message does NOT mention the task name exactly:
+       {
+         "status": "success",
+         "reason": "<last commit hash or 'none'>",
+         "details": "no commit done"
+       }
+     * Otherwise:
+       - Summarize what changed in the last commit in plain words (no bullets, keep concise).
+       - Return:
+         {
+           "status": "success",
+           "reason": "<last commit hash>",
+           "details": "<plain summary of last commit changes,  (escape quotes/backslashes)>"
+         }
+
+Rules:
+- Final assistant message must be exactly one JSON object, no code fences, no extra text.
+- Escape JSON specials: replace " with \", \ with \\, newlines with \n.
+- Do not include Markdown. No extra keys. No trailing commas.
+	`
 )
 
 var requiredKeys = []string{

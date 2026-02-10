@@ -347,6 +347,45 @@ func TestExecuteTaskWithStructuredOutput_Success(t *testing.T) {
 	require.Equal(t, &now, run.FinishedAt)
 }
 
+func TestExecuteTaskWithStructuredOutput_ReturnsLatestAssistantMessage(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	events := make(chan copilot.RawEvent, 3)
+	events <- copilot.RawEvent{"type": "assistant.message", "data": map[string]any{"content": "old"}}
+	events <- copilot.RawEvent{"type": "user.message", "data": map[string]any{"content": "user"}}
+	events <- copilot.RawEvent{"type": "assistant.message", "data": map[string]any{"content": `{"ok":true}`}}
+	close(events)
+
+	cp := &fakeCopilot{events: events, sessionID: "s-structured-content"}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 8, 18, 30, 0, 0, time.UTC)
+	status, resp, err := executeTaskWithStructuredOutput(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-structured-output" },
+		func() time.Time { return now },
+		&batch,
+		"task-structured-output",
+		"epic-structured-output",
+		"prompt",
+	)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+	require.Equal(t, `{"ok":true}`, resp)
+
+	run := st.runs["run-structured-output"]
+	require.Equal(t, "s-structured-content", run.SessionID)
+	require.Len(t, st.sessionEvents, 3)
+}
+
 func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()

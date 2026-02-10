@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -112,5 +113,5 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 
 	verifyPrompt, err := cfg.Get(VerificationTaskPromptKey)
 	require.NoError(t, err)
-	require.Equal(t, "TODO: verification task prompt", verifyPrompt)
+	require.Equal(t, strings.TrimSpace(defaultVerificationTaskPrompt), strings.TrimSpace(verifyPrompt))
 }
