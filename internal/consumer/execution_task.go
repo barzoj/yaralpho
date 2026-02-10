@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var executeTaskFunc = executeTask
+var executeTaskFunc = executeTaskWithAssistantMessages
 
 // ExecutionTask implements ExecutableTask by assembling prompts and delegating to executeTask.
 type ExecutionTask struct {
@@ -28,7 +28,7 @@ type ExecutionTask struct {
 	instruction string
 	newRunID    func() string
 	now         func() time.Time
-	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error)
+	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
 // NewExecutionTask constructs an ExecutionTask with sensible defaults for logger,
@@ -72,6 +72,11 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 		return storage.TaskRunStatusFailed, "", fmt.Errorf("get execution task prompt: %w", err)
 	}
 
+	// add taskID to the prompt if it's referenced
+	if strings.Contains(basePrompt, "%s") {
+		basePrompt = fmt.Sprintf(basePrompt, taskID)
+	}
+
 	comments, err := t.tracker.FetchComments(ctx, taskID)
 	if err != nil {
 		return storage.TaskRunStatusFailed, "", fmt.Errorf("fetch tracker comments: %w", err)
@@ -106,6 +111,6 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 		t.now = func() time.Time { return time.Now().UTC() }
 	}
 
-	status, err := t.exec(ctx, t.copilot, t.storage, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
-	return status, "", err
+	status, messages, err := t.exec(ctx, t.copilot, t.storage, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
+	return status, messages, err
 }

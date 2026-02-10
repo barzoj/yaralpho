@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,6 +121,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		return fmt.Errorf("get batch %s: %w", item.BatchID, err)
 	}
 	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusRunning)
+	w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "task_started", "")
 
 	runs, err := w.storage.ListTaskRuns(ctx, item.BatchID)
 	if err != nil {
@@ -134,26 +136,43 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 	}
 
 	if !isEpic {
-		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
-		execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
-		execTask.newRunID = w.newRunID
-		execTask.now = w.now
+		return w.handleSingleTask(ctx, batch, item)
+	}
 
-		status, _, finalErr := execTask.Execute(ctx, batch, item.TaskRef, "")
-		if status != storage.TaskRunStatusSucceeded {
-			return finalErr
+	return w.handleEpic(ctx, batch, item, runs)
+}
+
+func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, item QueueItem) error {
+	retries, hasRetries := w.parseMaxRetries()
+	attempts := 0
+	for {
+		attempts++
+		w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "attempt_started", fmt.Sprintf("attempt=%d", attempts))
+		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
+		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
+		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, "", execInstruction, verifyInstruction)
+		if err != nil {
+			return err
 		}
 
-		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
-		verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
-		verifyStatus, _, verifyErr := verifyTask.Execute(ctx, batch, item.TaskRef, "")
+		if agentResp.Status == "failure" {
+			if w.shouldRetry(ctx, batch, item.BatchID, item.TaskRef, agentResp, assistantOutput, attempts, retries, hasRetries) {
+				continue
+			}
+		}
+
 		if verifyStatus == storage.TaskRunStatusSucceeded {
+			w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "verification_succeeded", fmt.Sprintf("attempt=%d", attempts))
 			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
 			return nil
 		}
 
-		return verifyErr
+		return fmt.Errorf("verification task did not succeed: %s", output)
 	}
+}
+
+func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item QueueItem, runs []storage.TaskRun) error {
+	retries, hasRetries := w.parseMaxRetries()
 
 	for {
 		children, err := w.tracker.ListChildren(ctx, item.TaskRef)
@@ -171,25 +190,119 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 			return nil
 		}
 
-		execInstruction := fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef)
-		execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
-		execTask.newRunID = w.newRunID
-		execTask.now = w.now
+		attempts := 0
+		runRecorded := false
+		for {
+			attempts++
+			w.notifyTaskEvent(ctx, item.BatchID, child, "attempt_started", fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef))
+			execInstruction := fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef)
+			verifyInstruction := fmt.Sprintf("Verify task %s", child)
+			verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, child, item.TaskRef, execInstruction, verifyInstruction)
+			if err != nil {
+				return err
+			}
 
-		status, _, finalErr := execTask.Execute(ctx, batch, child, item.TaskRef)
-		runs = append(runs, storage.TaskRun{TaskRef: child})
+			if !runRecorded {
+				runs = append(runs, storage.TaskRun{TaskRef: child})
+				runRecorded = true
+			}
 
-		if status != storage.TaskRunStatusSucceeded {
-			return finalErr
-		}
+			if agentResp.Status == "failure" {
+				if w.shouldRetry(ctx, batch, item.BatchID, child, agentResp, assistantOutput, attempts, retries, hasRetries) {
+					continue
+				}
+			}
 
-		verifyInstruction := fmt.Sprintf("Verify task %s", child)
-		verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
-		verifyStatus, _, verifyErr := verifyTask.Execute(ctx, batch, child, item.TaskRef)
-		if verifyStatus != storage.TaskRunStatusSucceeded {
-			return verifyErr
+			if verifyStatus == storage.TaskRunStatusSucceeded {
+				w.notifyTaskEvent(ctx, item.BatchID, child, "verification_succeeded", fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef))
+				break
+			}
+
+			return fmt.Errorf("verification task did not succeed: %s", output)
 		}
 	}
+}
+
+func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, taskRef, parentRef, execInstruction, verifyInstruction string) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
+	execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
+	execTask.newRunID = w.newRunID
+	execTask.now = w.now
+
+	status, assistantOutput, finalErr := execTask.Execute(ctx, batch, taskRef, parentRef)
+	if status != storage.TaskRunStatusSucceeded {
+		return status, AgentStructuredResponse{}, assistantOutput, "", finalErr
+	}
+
+	verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
+	verifyStatus, output, verifyErr := verifyTask.Execute(ctx, batch, taskRef, parentRef)
+	if verifyErr != nil {
+		w.logger.Warn("verification task execution error", zap.Error(verifyErr), zap.String("task_ref", taskRef))
+		return verifyStatus, AgentStructuredResponse{}, assistantOutput, output, verifyErr
+	}
+
+	var agentResp AgentStructuredResponse
+	if err := json.Unmarshal([]byte(output), &agentResp); err != nil {
+		w.logger.Warn("unmarshal agent response", zap.Error(err), zap.String("output", output))
+	} else {
+		w.logger.Info("agent structured response", zap.String("status", agentResp.Status), zap.String("reason", agentResp.Reason), zap.String("details", agentResp.Details))
+	}
+
+	return verifyStatus, agentResp, assistantOutput, output, nil
+}
+
+func (w *Worker) shouldRetry(ctx context.Context, batch *storage.Batch, batchID, taskRef string, agentResp AgentStructuredResponse, assistantOutput string, attempts, retries int, hasRetries bool) bool {
+	w.logger.Info("agent indicated task failure", zap.String("task_ref", taskRef), zap.String("reason", agentResp.Reason), zap.String("details", agentResp.Details))
+	if err := w.tracker.AddComment(ctx, taskRef, fmt.Sprintf("Verification failed: %s\nDetails: %s\nAssistant output: %s", agentResp.Reason, agentResp.Details, assistantOutput)); err != nil {
+		w.logger.Warn("add tracker comment for failed verification", zap.Error(err), zap.String("task_ref", taskRef))
+	}
+
+	info := fmt.Sprintf("attempt=%d reason=%s details=%s", attempts, agentResp.Reason, agentResp.Details)
+	w.notifyTaskEvent(ctx, batchID, taskRef, "verification_failed", info)
+
+	if !hasRetries {
+		return false
+	}
+
+	if attempts >= retries {
+		w.logger.Info("max verification attempts reached; marking batch as failed", zap.String("batch_id", batchID), zap.Int("attempts", attempts), zap.Int("max_retries", retries))
+		setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
+		w.notifyTaskEvent(ctx, batchID, taskRef, "verification_failed_max_retries", info)
+		_ = w.notifier.NotifyError(ctx, batchID, "", taskRef, fmt.Errorf("verification failed after %d attempts: %s", attempts, agentResp.Reason))
+		return false
+	}
+
+	w.notifyTaskEvent(ctx, batchID, taskRef, "verification_failed_retrying", fmt.Sprintf("%s retry_in=%d", info, retries-attempts))
+	return true
+}
+
+func (w *Worker) notifyTaskEvent(ctx context.Context, batchID, taskRef, status, details string) {
+	if w.notifier == nil {
+		return
+	}
+
+	fullStatus := status
+	if strings.TrimSpace(details) != "" {
+		fullStatus = fmt.Sprintf("%s (%s)", status, details)
+	}
+
+	if err := w.notifier.NotifyTaskFinished(ctx, batchID, "", taskRef, fullStatus, ""); err != nil {
+		w.logger.Warn("notify task event", zap.Error(err), zap.String("status", fullStatus), zap.String("batch_id", batchID), zap.String("task_ref", taskRef))
+	}
+}
+
+func (w *Worker) parseMaxRetries() (int, bool) {
+	value, err := w.cfg.Get(config.MaxRetriesKey)
+	if err != nil {
+		return 0, false
+	}
+
+	maxRetries, err := strconv.Atoi(value)
+	if err != nil {
+		w.logger.Warn("invalid max retries config value; must be an integer", zap.Error(err), zap.String("value", value))
+		maxRetries = 3
+	}
+
+	return maxRetries, true
 }
 
 func isSessionIdleEvent(evt copilot.RawEvent) bool {

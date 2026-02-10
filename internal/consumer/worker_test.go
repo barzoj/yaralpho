@@ -70,9 +70,12 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	require.Len(t, st.sessionEvents, 2)
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 
-	require.Len(t, nt.finished, 2)
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[0])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[1])
+	require.Len(t, nt.finished, 5)
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "task_started"}, nt.finished[0])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "attempt_started (attempt=1)"}, nt.finished[1])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[2])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[3])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "verification_succeeded (attempt=1)"}, nt.finished[4])
 }
 
 func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
@@ -384,6 +387,46 @@ func TestExecuteTaskWithStructuredOutput_ReturnsLatestAssistantMessage(t *testin
 	run := st.runs["run-structured-output"]
 	require.Equal(t, "s-structured-content", run.SessionID)
 	require.Len(t, st.sessionEvents, 3)
+}
+
+func TestExecuteTaskWithAssistantMessages_ReturnsAllAssistantMessages(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	events := make(chan copilot.RawEvent, 4)
+	events <- copilot.RawEvent{"type": "assistant.message", "data": map[string]any{"content": "first"}}
+	events <- copilot.RawEvent{"type": "user.message", "data": map[string]any{"content": "user"}}
+	events <- copilot.RawEvent{"type": "assistant.message", "data": map[string]any{"content": "second"}}
+	events <- copilot.RawEvent{"type": "assistant.message", "data": map[string]any{"content": "third"}}
+	close(events)
+
+	cp := &fakeCopilot{events: events, sessionID: "s-assistant-messages"}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 8, 18, 45, 0, 0, time.UTC)
+	status, resp, err := executeTaskWithAssistantMessages(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-assistant-messages" },
+		func() time.Time { return now },
+		&batch,
+		"task-assistant-messages",
+		"epic-assistant-messages",
+		"prompt",
+	)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+	require.Equal(t, "first\nsecond\nthird", resp)
+
+	run := st.runs["run-assistant-messages"]
+	require.Equal(t, "s-assistant-messages", run.SessionID)
+	require.Len(t, st.sessionEvents, 4)
 }
 
 func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.T) {

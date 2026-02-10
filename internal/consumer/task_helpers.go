@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/barzoj/yaralpho/internal/copilot"
@@ -174,6 +175,53 @@ func executeTaskWithStructuredOutput(
 	return status, structuredOutput, err
 }
 
+// executeTaskWithAssistantMessages wraps executeTask to return all assistant.message contents
+// concatenated with newlines in the order they were received.
+func executeTaskWithAssistantMessages(
+	ctx context.Context,
+	cp copilot.Client,
+	st storage.Storage,
+	nt notify.Notifier,
+	logger *zap.Logger,
+	repoPath string,
+	newRunID func() string,
+	now func() time.Time,
+	batch *storage.Batch,
+	runRef,
+	epicRef,
+	prompt string,
+) (storage.TaskRunStatus, string, error) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	generatedRunID := newRunID()
+	status, err := executeTask(ctx, cp, st, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
+
+	if st == nil || generatedRunID == "" {
+		return status, "", err
+	}
+
+	run, getRunErr := st.GetTaskRun(ctx, generatedRunID)
+	if getRunErr != nil {
+		logger.Debug("fetch task run for assistant messages", zap.Error(getRunErr), zap.String("run_id", generatedRunID))
+		return status, "", err
+	}
+
+	if run.SessionID == "" {
+		return status, "", err
+	}
+
+	events, listErr := st.ListSessionEvents(ctx, run.SessionID)
+	if listErr != nil {
+		logger.Debug("list session events for assistant messages", zap.Error(listErr), zap.String("session_id", run.SessionID), zap.String("run_id", generatedRunID))
+		return status, "", err
+	}
+
+	messages := assistantMessageContents(events)
+	return status, strings.Join(messages, "\n"), err
+}
+
 func setBatchStatus(ctx context.Context, st storage.Storage, logger *zap.Logger, batch *storage.Batch, status storage.BatchStatus) {
 	if batch == nil {
 		return
@@ -188,22 +236,31 @@ func setBatchStatus(ctx context.Context, st storage.Storage, logger *zap.Logger,
 }
 
 func latestAssistantMessageContent(events []storage.SessionEvent) string {
-	for i := len(events) - 1; i >= 0; i-- {
-		eventType, ok := events[i].Event["type"].(string)
+	messages := assistantMessageContents(events)
+	if len(messages) == 0 {
+		return ""
+	}
+	return messages[len(messages)-1]
+}
+
+func assistantMessageContents(events []storage.SessionEvent) []string {
+	msgs := make([]string, 0)
+	for _, evt := range events {
+		eventType, ok := evt.Event["type"].(string)
 		if !ok || eventType != "assistant.message" {
 			continue
 		}
 
-		data, ok := events[i].Event["data"].(map[string]any)
+		data, ok := evt.Event["data"].(map[string]any)
 		if !ok {
 			continue
 		}
 
 		content, ok := data["content"].(string)
 		if ok {
-			return content
+			msgs = append(msgs, content)
 		}
 	}
 
-	return ""
+	return msgs
 }
