@@ -59,10 +59,10 @@ func NewExecutionTask(tr tracker.Tracker, cp copilot.Client, st storage.Storage,
 
 // Execute fetches tracker comments, builds a comment-aware prompt, and delegates
 // execution to executeTask.
-func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskID, epicID string) (storage.TaskRunStatus, error) {
+func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskID, epicID string) (storage.TaskRunStatus, string, error) {
 	comments, err := t.tracker.FetchComments(ctx, taskID)
 	if err != nil {
-		return storage.TaskRunStatusFailed, fmt.Errorf("fetch tracker comments: %w", err)
+		return storage.TaskRunStatusFailed, "", fmt.Errorf("fetch tracker comments: %w", err)
 	}
 
 	prompt := strings.TrimSpace(t.basePrompt)
@@ -94,5 +94,6 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 		t.now = func() time.Time { return time.Now().UTC() }
 	}
 
-	return t.exec(ctx, t.copilot, t.storage, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
+	status, err := t.exec(ctx, t.copilot, t.storage, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
+	return status, "", err
 }

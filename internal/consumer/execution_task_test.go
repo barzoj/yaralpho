@@ -37,9 +37,10 @@ func TestExecutionTaskBuildsPromptWithComments(t *testing.T) {
 		return storage.TaskRunStatusSucceeded, nil
 	}
 
-	status, err := task.Execute(context.Background(), &storage.Batch{ID: "b1"}, "task-1", "epic-1")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b1"}, "task-1", "epic-1")
 	require.NoError(t, err)
 	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+	require.Empty(t, resp)
 	require.Equal(t, 1, execCalls)
 
 	require.Equal(t, []string{"task-1"}, tr.refs)
@@ -57,9 +58,10 @@ func TestExecutionTaskWithoutCommentsUsesBasePrompt(t *testing.T) {
 		return storage.TaskRunStatusSucceeded, nil
 	}
 
-	status, err := task.Execute(context.Background(), &storage.Batch{ID: "b2"}, "task-2", "")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b2"}, "task-2", "")
 	require.NoError(t, err)
 	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+	require.Empty(t, resp)
 	require.Equal(t, "solo prompt", prompt)
 	require.Equal(t, []string{"task-2"}, tr.refs)
 }
@@ -74,10 +76,11 @@ func TestExecutionTaskPropagatesFetchError(t *testing.T) {
 		return storage.TaskRunStatusSucceeded, nil
 	}
 
-	status, err := task.Execute(context.Background(), &storage.Batch{ID: "b3"}, "task-3", "")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b3"}, "task-3", "")
 	require.Error(t, err)
 	require.ErrorContains(t, err, "fetch tracker comments")
 	require.Equal(t, storage.TaskRunStatusFailed, status)
+	require.Empty(t, resp)
 	require.False(t, called)
 	require.Equal(t, []string{"task-3"}, tr.refs)
 }
