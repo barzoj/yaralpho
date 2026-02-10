@@ -116,7 +116,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
 		return fmt.Errorf("get batch %s: %w", item.BatchID, err)
 	}
-	w.setBatchStatus(ctx, batch, storage.BatchStatusRunning)
+	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusRunning)
 
 	runs, err := w.storage.ListTaskRuns(ctx, item.BatchID)
 	if err != nil {
@@ -126,14 +126,14 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 	isEpic, err := w.tracker.IsEpic(ctx, item.TaskRef)
 	if err != nil {
 		_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
-		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
+		setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
 		return fmt.Errorf("tracker is-epic: %w", err)
 	}
 
 	if !isEpic {
-		status, finalErr := w.executeTaskRun(ctx, batch, item.TaskRef, "", fmt.Sprintf("Work on task %s", item.TaskRef))
+		status, finalErr := w.executeTask(ctx, batch, item.TaskRef, "", fmt.Sprintf("Work on task %s", item.TaskRef))
 		if status == storage.TaskRunStatusSucceeded {
-			w.setBatchStatus(ctx, batch, storage.BatchStatusIdle)
+			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
 			return nil
 		}
 
@@ -144,19 +144,19 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		children, err := w.tracker.ListChildren(ctx, item.TaskRef)
 		if err != nil {
 			_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
-			w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
+			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
 			return fmt.Errorf("tracker list children: %w", err)
 		}
 
 		child, ok := firstAvailableChild(children, runs)
 		if !ok {
-			w.setBatchStatus(ctx, batch, storage.BatchStatusIdle)
+			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
 			_ = w.notifier.NotifyBatchIdle(ctx, item.BatchID)
 			w.logger.Info("no remaining child tasks for epic", zap.String("epic", item.TaskRef))
 			return nil
 		}
 
-		status, finalErr := w.executeTaskRun(ctx, batch, child, item.TaskRef, fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef))
+		status, finalErr := w.executeTask(ctx, batch, child, item.TaskRef, fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef))
 		runs = append(runs, storage.TaskRun{TaskRef: child})
 
 		if status != storage.TaskRunStatusSucceeded {
@@ -165,120 +165,8 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 	}
 }
 
-func (w *Worker) executeTaskRun(ctx context.Context, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error) {
-	runID := w.newRunID()
-
-	sessionID, events, stop, err := w.copilot.StartSession(ctx, prompt, w.repoPath)
-	if err != nil {
-		finished := w.now()
-		run := storage.TaskRun{
-			ID:         runID,
-			BatchID:    batch.ID,
-			TaskRef:    runRef,
-			EpicRef:    epicRef,
-			SessionID:  "",
-			StartedAt:  w.now(),
-			FinishedAt: &finished,
-			Status:     storage.TaskRunStatusFailed,
-		}
-		if createErr := w.storage.CreateTaskRun(ctx, &run); createErr != nil {
-			w.logger.Error("record failed run", zap.Error(createErr), zap.String("run_id", run.ID))
-		}
-
-		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
-		_ = w.notifier.NotifyError(ctx, batch.ID, runID, runRef, err)
-		return storage.TaskRunStatusFailed, fmt.Errorf("start copilot session: %w", err)
-	}
-	defer stop()
-
-	run := storage.TaskRun{
-		ID:        runID,
-		BatchID:   batch.ID,
-		TaskRef:   runRef,
-		EpicRef:   epicRef,
-		SessionID: sessionID,
-		StartedAt: w.now(),
-		Status:    storage.TaskRunStatusRunning,
-	}
-
-	if err := w.storage.CreateTaskRun(ctx, &run); err != nil {
-		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
-		_ = w.notifier.NotifyError(ctx, batch.ID, runID, runRef, err)
-		return storage.TaskRunStatusFailed, fmt.Errorf("create task run: %w", err)
-	}
-
-	status := storage.TaskRunStatusSucceeded
-	var finalErr error
-
-eventLoop:
-	for {
-		select {
-		case <-ctx.Done():
-			status = storage.TaskRunStatusStopped
-			finalErr = ctx.Err()
-			break eventLoop
-		case evt, ok := <-events:
-			if !ok {
-				break eventLoop
-			}
-
-			err := w.storage.InsertSessionEvent(ctx, &storage.SessionEvent{
-				BatchID:    batch.ID,
-				RunID:      run.ID,
-				SessionID:  sessionID,
-				Event:      evt,
-				IngestedAt: w.now(),
-			})
-			if err != nil {
-				status = storage.TaskRunStatusFailed
-				finalErr = err
-				w.logger.Error("insert session event", zap.Error(err), zap.String("run_id", run.ID))
-				break eventLoop
-			}
-
-			if isSessionIdleEvent(evt) {
-				w.logger.Debug("copilot session idle event received; stopping run", zap.String("run_id", run.ID), zap.String("session_id", sessionID))
-				break eventLoop
-			}
-		}
-	}
-
-	finished := w.now()
-	run.Status = status
-	run.FinishedAt = &finished
-
-	if err := w.storage.UpdateTaskRun(ctx, &run); err != nil {
-		w.logger.Error("update task run", zap.Error(err), zap.String("run_id", run.ID))
-	}
-
-	switch status {
-	case storage.TaskRunStatusSucceeded:
-		_ = w.notifier.NotifyTaskFinished(ctx, batch.ID, run.ID, run.TaskRef, string(run.Status), "")
-	case storage.TaskRunStatusStopped:
-		_ = w.notifier.NotifyBatchIdle(ctx, batch.ID)
-		w.setBatchStatus(ctx, batch, storage.BatchStatusIdle)
-	default:
-		if finalErr == nil {
-			finalErr = fmt.Errorf("task run failed")
-		}
-		_ = w.notifier.NotifyError(ctx, batch.ID, run.ID, run.TaskRef, finalErr)
-		w.setBatchStatus(ctx, batch, storage.BatchStatusFailed)
-	}
-
-	return status, finalErr
-}
-
-func (w *Worker) setBatchStatus(ctx context.Context, batch *storage.Batch, status storage.BatchStatus) {
-	if batch == nil {
-		return
-	}
-	if batch.Status == status {
-		return
-	}
-	batch.Status = status
-	if err := w.storage.UpdateBatch(ctx, batch); err != nil {
-		w.logger.Error("update batch status", zap.Error(err), zap.String("batch_id", batch.ID))
-	}
+func (w *Worker) executeTask(ctx context.Context, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error) {
+	return executeTask(ctx, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, w.newRunID, w.now, batch, runRef, epicRef, prompt)
 }
 
 func isSessionIdleEvent(evt copilot.RawEvent) bool {

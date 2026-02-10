@@ -9,6 +9,7 @@ import (
 
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/storage"
+	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -179,6 +180,95 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 	require.Len(t, nt.errors, 1)
 }
 
+func TestExecuteTask_Success(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	cp := &fakeCopilot{events: closedChan(), sessionID: "s-success"}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 8, 16, 0, 0, 0, time.UTC)
+	status, err := executeTask(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-success" },
+		func() time.Time { return now },
+		&batch,
+		"task-1",
+		"epic-1",
+		"prompt",
+	)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+
+	run := st.runs["run-success"]
+	require.Equal(t, "task-1", run.TaskRef)
+	require.Equal(t, "epic-1", run.EpicRef)
+	require.Equal(t, "s-success", run.SessionID)
+	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
+	require.Equal(t, &now, run.FinishedAt)
+
+	require.Len(t, nt.finished, 1)
+	require.Equal(t, storage.BatchStatusCreated, st.batches["b1"].Status)
+}
+
+func TestExecuteTask_StartSessionErrorSetsFailed(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	cp := &fakeCopilot{startErr: errors.New("boom")}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 8, 17, 0, 0, 0, time.UTC)
+	status, err := executeTask(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-fail" },
+		func() time.Time { return now },
+		&batch,
+		"task-err",
+		"",
+		"prompt",
+	)
+
+	require.Error(t, err)
+	require.Equal(t, storage.TaskRunStatusFailed, status)
+
+	run := st.runs["run-fail"]
+	require.Equal(t, storage.TaskRunStatusFailed, run.Status)
+	require.Equal(t, storage.BatchStatusFailed, st.batches["b1"].Status)
+	require.Len(t, nt.errors, 1)
+}
+
+func TestSetBatchStatus(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	setBatchStatus(ctx, st, zap.NewNop(), nil, storage.BatchStatusRunning)
+	require.Equal(t, 0, st.updateBatchCalls)
+
+	setBatchStatus(ctx, st, zap.NewNop(), &batch, storage.BatchStatusCreated)
+	require.Equal(t, 0, st.updateBatchCalls)
+
+	setBatchStatus(ctx, st, zap.NewNop(), &batch, storage.BatchStatusRunning)
+	require.Equal(t, 1, st.updateBatchCalls)
+	require.Equal(t, storage.BatchStatusRunning, st.batches["b1"].Status)
+}
+
 func closedChan() chan copilot.RawEvent {
 	ch := make(chan copilot.RawEvent)
 	close(ch)
@@ -233,10 +323,19 @@ func (f *fakeTracker) ListChildren(ctx context.Context, ref string) ([]string, e
 	return f.children[ref], nil
 }
 
+func (f *fakeTracker) AddComment(ctx context.Context, ref string, text string) error {
+	return nil
+}
+
+func (f *fakeTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+	return []tracker.Comment{}, nil
+}
+
 type fakeStorage struct {
-	batches       map[string]storage.Batch
-	runs          map[string]storage.TaskRun
-	sessionEvents []storage.SessionEvent
+	batches          map[string]storage.Batch
+	runs             map[string]storage.TaskRun
+	sessionEvents    []storage.SessionEvent
+	updateBatchCalls int
 }
 
 func newFakeStorage() *fakeStorage {
@@ -253,6 +352,7 @@ func (f *fakeStorage) CreateBatch(ctx context.Context, batch *storage.Batch) err
 
 func (f *fakeStorage) UpdateBatch(ctx context.Context, batch *storage.Batch) error {
 	f.batches[batch.ID] = *batch
+	f.updateBatchCalls++
 	return nil
 }
 

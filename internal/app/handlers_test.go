@@ -13,6 +13,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
+	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
@@ -118,6 +119,10 @@ type noopTracker struct{}
 
 func (noopTracker) IsEpic(ctx context.Context, ref string) (bool, error) { return false, nil }
 func (noopTracker) ListChildren(ctx context.Context, ref string) ([]string, error) {
+	return nil, nil
+}
+func (noopTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
+func (noopTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
 	return nil, nil
 }
 
