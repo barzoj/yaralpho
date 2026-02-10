@@ -63,7 +63,7 @@
       summary: (data) => data?.message || data?.reason,
     },
     "session.handoff": { emoji: "🤝", label: "Session handoff" },
-    "session.idle": { emoji: "💤", label: "Session idle" },
+    "session.idle": { emoji: "💤", label: "Session idle", render: renderSessionIdle },
     "session.info": { emoji: "ℹ️", label: "Session info" },
     "session.model_change": {
       emoji: "🧠",
@@ -88,6 +88,7 @@
     "skill.invoked": {
       emoji: "📦",
       label: "Skill invoked",
+      render: renderSkillInvoked,
       summary: (data) =>
         data?.name || (data?.content ? data.content.split("\n")[0] : ""),
     },
@@ -115,6 +116,7 @@
     "tool.execution_complete": {
       emoji: "🛠️",
       label: "Tool complete",
+      render: renderToolExecutionComplete,
       summary: (data) => formatToolSummary(data),
     },
     "tool.execution_partial_result": {
@@ -130,6 +132,7 @@
     "tool.execution_start": {
       emoji: "🛠️",
       label: "Tool start",
+      render: renderToolExecutionStart,
       summary: (data) => formatToolSummary(data),
     },
     "tool.user_requested": { emoji: "🙋", label: "Tool requested by user" },
@@ -140,7 +143,11 @@
     },
   };
 
-  const DEFAULT_EVENT_META = { emoji: "❔", label: "Unknown event" };
+  const DEFAULT_EVENT_META = {
+    emoji: "❔",
+    label: "Unknown event",
+    render: renderUnknownEvent,
+  };
 
   function setStatus(text, type = "info") {
     statusEl.textContent = text;
@@ -264,7 +271,8 @@
   }
 
   function getEventMeta(type) {
-    return EVENT_META[type] || { ...DEFAULT_EVENT_META };
+    const meta = EVENT_META[type];
+    return meta ? { ...DEFAULT_EVENT_META, ...meta } : { ...DEFAULT_EVENT_META };
   }
 
   function shouldRenderEvent(evt) {
@@ -399,6 +407,18 @@
     return `${value}ms`;
   }
 
+  function renderUnknownEvent(evt) {
+    const type = getEventType(evt);
+    const data = getEventData(evt);
+    const keys =
+      data && typeof data === "object" ? Object.keys(data).filter(Boolean) : [];
+    const info = [];
+    if (type && type !== "unknown") info.push(`Type: ${type}`);
+    if (keys.length) info.push(`Fields: ${keys.slice(0, 5).join(", ")}`);
+    const summary = info.join(" • ") || "Unrecognized event";
+    return createChatBubble(summary, "chat-system", "Unknown event");
+  }
+
   function renderUserMessage(evt) {
     const data = getEventData(evt);
     return createChatBubble(resolveMessageText(data), "chat-user");
@@ -442,6 +462,128 @@
     return createChatBubble(text, "chat-assistant", fallback);
   }
 
+  function formatToolName(data) {
+    return (
+      data?.toolName ||
+      data?.mcpToolName ||
+      data?.mcpServerName ||
+      data?.name ||
+      ""
+    );
+  }
+
+  function truncateText(text, limit = 200) {
+    if (text === null || text === undefined) return "";
+    const str = String(text);
+    return str.length > limit ? `${str.slice(0, limit - 1)}…` : str;
+  }
+
+  function parseFrontMatter(text) {
+    if (typeof text !== "string") return { meta: {}, body: "" };
+    const source = text.startsWith("\ufeff") ? text.slice(1) : text;
+    if (!source.startsWith("---\n")) return { meta: {}, body: source };
+    const end = source.indexOf("\n---", 4);
+    if (end === -1) return { meta: {}, body: source };
+    const meta = {};
+    const metaBlock = source.slice(4, end);
+    metaBlock.split("\n").forEach((line) => {
+      const idx = line.indexOf(":");
+      if (idx === -1) return;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      if (key) meta[key] = value;
+    });
+    const body = source.slice(end + 4);
+    return { meta, body };
+  }
+
+  function extractFirstNonEmptyLine(text, skipValue) {
+    if (!text) return "";
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+      const value = line.trim();
+      if (!value) continue;
+      if (skipValue && value === skipValue.trim()) {
+        skipValue = null;
+        continue;
+      }
+      return value;
+    }
+    return "";
+  }
+
+  function stringifyCompact(value, limit = 200) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return truncateText(value, limit);
+    try {
+      return truncateText(JSON.stringify(value), limit);
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function summarizeToolArguments(args, limit = 200) {
+    if (args === null || args === undefined) return "(no arguments)";
+    const summary = stringifyCompact(args, limit);
+    return summary || "(no arguments)";
+  }
+
+  function summarizeToolResult(data, limit = 200) {
+    if (!data) return "(no result)";
+    if (data.error) {
+      if (typeof data.error === "string") return `Error: ${truncateText(data.error, limit)}`;
+      if (typeof data.error.message === "string")
+        return `Error: ${truncateText(data.error.message, limit)}`;
+    }
+    if (data.result?.content) return truncateText(data.result.content, limit);
+    if (data.result?.detailedContent) return truncateText(data.result.detailedContent, limit);
+    if (data.output) return stringifyCompact(data.output, limit);
+    if (data.partialOutput) return stringifyCompact(data.partialOutput, limit);
+    if (data.progressMessage) return truncateText(data.progressMessage, limit);
+    return "(no result)";
+  }
+
+  function renderToolExecutionStart(evt) {
+    const data = getEventData(evt);
+    const name = formatToolName(data) || "Tool execution";
+    const lines = [
+      [name, data?.toolCallId ? `Call ${data.toolCallId}` : ""].filter(Boolean).join(" • "),
+      `Args: ${summarizeToolArguments(data?.arguments, 180)}`,
+    ].filter(Boolean);
+    return createChatBubble(lines.join("\n"), "chat-system", "Tool call started");
+  }
+
+  function renderToolExecutionComplete(evt) {
+    const data = getEventData(evt);
+    const name = formatToolName(data) || "Tool execution";
+    const status = data?.error ? "Failed" : "Complete";
+    const lines = [
+      [name, status, data?.toolCallId ? `Call ${data.toolCallId}` : ""]
+        .filter(Boolean)
+        .join(" • "),
+      summarizeToolResult(data, 200),
+    ].filter(Boolean);
+    return createChatBubble(lines.join("\n"), "chat-system", "Tool call complete");
+  }
+
+  function renderSkillInvoked(evt) {
+    const data = getEventData(evt);
+    const rawContent = typeof data?.content === "string" ? data.content : "";
+    const { meta, body } = parseFrontMatter(rawContent);
+    const name = data?.name || meta.name || extractFirstNonEmptyLine(body);
+    const description =
+      data?.description ||
+      meta.description ||
+      extractFirstNonEmptyLine(body, name);
+    const lines = [];
+    if (name) lines.push(truncateText(name, 120));
+    if (description) lines.push(truncateText(description, 200));
+    if (!lines.length && rawContent) {
+      lines.push(truncateText(extractFirstNonEmptyLine(rawContent), 200));
+    }
+    return createChatBubble(lines.join("\n"), "chat-system", "Skill invoked");
+  }
+
   function renderTurnMarker(evt, label) {
     const data = getEventData(evt);
     const turnId = data?.turnId;
@@ -473,6 +615,13 @@
       createMetricChip("Messages", formatNumber(data?.messagesLength)),
     ];
     return renderMetricsRow(chips, "No usage info provided");
+  }
+
+  function renderSessionIdle() {
+    const summary = document.createElement("div");
+    summary.className = "event-summary";
+    summary.textContent = "Idle heartbeat";
+    return summary;
   }
 
   function formatEventSummary(evt, meta) {
@@ -735,20 +884,37 @@
     info.className = "pill";
     const rawEvents = eventsData.events || [];
     const visibleEvents = filterRenderableEvents(rawEvents);
-    const totalCount = eventsData.count ?? rawEvents.length;
-    const hiddenCount = Math.max(0, totalCount - visibleEvents.length);
+    const totalCountRaw = eventsData.count ?? rawEvents.length;
+    const totalCount = Number.isFinite(Number(totalCountRaw))
+      ? Number(totalCountRaw)
+      : rawEvents.length;
+    const streamingHiddenCount = Math.max(0, rawEvents.length - visibleEvents.length);
+    const truncatedCount = Math.max(0, totalCount - rawEvents.length);
+    const hiddenMessages = [];
+    if (streamingHiddenCount > 0) {
+      hiddenMessages.push(`${streamingHiddenCount} streaming deltas hidden`);
+    }
+    if (truncatedCount > 0) {
+      hiddenMessages.push(`${truncatedCount} truncated by server`);
+    }
+    const baseLabel = `${visibleEvents.length} of ${totalCount} events shown`;
     info.textContent =
-      hiddenCount > 0
-        ? `${visibleEvents.length} of ${totalCount} events shown (streaming deltas hidden)`
+      hiddenMessages.length > 0
+        ? `${baseLabel} (${hiddenMessages.join("; ")})`
         : `${visibleEvents.length} event${visibleEvents.length === 1 ? "" : "s"} loaded`;
     contentEl.appendChild(info);
 
     contentEl.appendChild(renderEventsList(visibleEvents));
 
     if (eventsData.events_truncated) {
+      const limitUsedRaw =
+        eventsData.event_limit_used ?? eventsData.count ?? EVENTS_LIMIT;
+      const limitUsed = Number.isFinite(Number(limitUsedRaw))
+        ? Number(limitUsedRaw)
+        : limitUsedRaw;
       const note = document.createElement("div");
       note.className = "status warning";
-      note.textContent = `Only showing first ${eventsData.event_limit_used} events.`;
+      note.textContent = `Only showing first ${limitUsed} events (server truncated).`;
       contentEl.appendChild(note);
     }
 
