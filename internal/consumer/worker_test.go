@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
@@ -22,8 +23,8 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	st.batches["b1"] = batch
 
 	cp := &fakeCopilot{
-		events:    make(chan copilot.RawEvent, 2),
-		sessionID: "s123",
+		events:     make(chan copilot.RawEvent, 2),
+		sessionIDs: []string{"s123", "s123-verify"},
 	}
 	cp.events <- copilot.RawEvent{"type": "event1"}
 	cp.events <- copilot.RawEvent{"type": "event2"}
@@ -32,17 +33,28 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	tr := &fakeTracker{}
 
 	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec base",
+		config.VerificationTaskPromptKey: "verify base",
+	}
 
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
-	w.newRunID = func() string { return "run-1" }
+	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	nextRun := 0
+	w.newRunID = func() string {
+		nextRun++
+		return fmt.Sprintf("run-%d", nextRun)
+	}
 	now := time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
 
 	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-1"})
 	require.NoError(t, w.handleItem(ctx, payload))
 
-	require.Equal(t, "Work on task task-1", cp.prompt)
-	require.Equal(t, "/repo", cp.repoPath)
+	require.Equal(t, []string{
+		"exec base\n\nWork on task task-1",
+		"verify base\n\nVerify task task-1",
+	}, cp.prompts)
+	require.Equal(t, []string{"/repo", "/repo"}, cp.repoPaths)
 
 	run, ok := st.runs["run-1"]
 	require.True(t, ok)
@@ -50,11 +62,17 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	require.Equal(t, "task-1", run.TaskRef)
 	require.Equal(t, "s123", run.SessionID)
 
+	verifyRun := st.runs["run-2"]
+	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun.Status)
+	require.Equal(t, "task-1", verifyRun.TaskRef)
+	require.Equal(t, "s123-verify", verifyRun.SessionID)
+
 	require.Len(t, st.sessionEvents, 2)
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 
-	require.Len(t, nt.finished, 1)
+	require.Len(t, nt.finished, 2)
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[0])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[1])
 }
 
 func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
@@ -62,28 +80,43 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 	st := newFakeStorage()
 	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
 
-	events := make(chan copilot.RawEvent, 1)
-	events <- copilot.RawEvent{"type": "session.idle", "id": "ev-1"}
+	firstRunEvents := make(chan copilot.RawEvent, 1)
+	firstRunEvents <- copilot.RawEvent{"type": "session.idle", "id": "ev-1"}
+	close(firstRunEvents)
 
 	cp := &fakeCopilot{
-		events:    events,
-		sessionID: "s-idle",
+		eventQueue: []chan copilot.RawEvent{firstRunEvents, closedChan()},
+		sessionIDs: []string{"s-idle", "s-verify"},
 	}
 
 	tr := &fakeTracker{}
 	nt := &fakeNotifier{}
 
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
-	w.newRunID = func() string { return "run-idle" }
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+	}
+
+	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	nextRun := 0
+	w.newRunID = func() string {
+		nextRun++
+		return fmt.Sprintf("run-idle-%d", nextRun)
+	}
 	now := time.Date(2026, 2, 8, 15, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
 
 	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-idle"})
 	require.NoError(t, w.handleItem(ctx, payload))
 
-	run := st.runs["run-idle"]
+	run := st.runs["run-idle-1"]
 	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
 	require.Equal(t, "s-idle", run.SessionID)
+
+	verifyRun := st.runs["run-idle-2"]
+	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun.Status)
+	require.Equal(t, "s-verify", verifyRun.SessionID)
+
 	require.Len(t, st.sessionEvents, 1)
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 	require.True(t, cp.stopped)
@@ -107,8 +140,12 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	}
 
 	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec base",
+		config.VerificationTaskPromptKey: "verify base",
+	}
 
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
+	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	nextID := 2
 	w.newRunID = func() string {
 		id := fmt.Sprintf("run-%d", nextID)
@@ -120,17 +157,32 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
 	require.NoError(t, w.handleItem(ctx, payload))
 
-	require.Equal(t, "Pick first ready task from epic epic-1 and execute", cp.prompt)
+	require.Equal(t, []string{
+		"exec base\n\nPick first ready task from epic epic-1 and execute",
+		"verify base\n\nVerify task child-2",
+		"exec base\n\nPick first ready task from epic epic-1 and execute",
+		"verify base\n\nVerify task child-3",
+	}, cp.prompts)
 
 	run1 := st.runs["run-2"]
 	require.Equal(t, "child-2", run1.TaskRef)
 	require.Equal(t, "epic-1", run1.EpicRef)
 	require.Equal(t, storage.TaskRunStatusSucceeded, run1.Status)
 
-	run2 := st.runs["run-3"]
+	verifyRun1 := st.runs["run-3"]
+	require.Equal(t, "child-2", verifyRun1.TaskRef)
+	require.Equal(t, "epic-1", verifyRun1.EpicRef)
+	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun1.Status)
+
+	run2 := st.runs["run-4"]
 	require.Equal(t, "child-3", run2.TaskRef)
 	require.Equal(t, "epic-1", run2.EpicRef)
 	require.Equal(t, storage.TaskRunStatusSucceeded, run2.Status)
+
+	verifyRun2 := st.runs["run-5"]
+	require.Equal(t, "child-3", verifyRun2.TaskRef)
+	require.Equal(t, "epic-1", verifyRun2.EpicRef)
+	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun2.Status)
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 }
 
@@ -147,7 +199,12 @@ func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
 	nt := &fakeNotifier{}
 	cp := &fakeCopilot{events: closedChan(), sessionID: "s1"}
 
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+	}
+
+	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
 	err := w.handleItem(ctx, payload)
 	require.NoError(t, err)
@@ -165,8 +222,12 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 	cp := &fakeCopilot{startErr: errors.New("no token")}
 	tr := &fakeTracker{}
 	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+	}
 
-	w := NewWorker(nil, tr, cp, st, nt, "/repo", zap.NewNop())
+	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	w.newRunID = func() string { return "run-fail" }
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 14, 0, 0, 0, time.UTC) }
 
@@ -347,22 +408,45 @@ func closedChan() chan copilot.RawEvent {
 // fakes below ---------------------------------------------------------------
 
 type fakeCopilot struct {
-	prompt    string
-	repoPath  string
-	events    chan copilot.RawEvent
-	sessionID string
-	startErr  error
-	stopped   bool
+	prompts    []string
+	repoPaths  []string
+	events     chan copilot.RawEvent
+	eventQueue []chan copilot.RawEvent
+	sessionID  string
+	sessionIDs []string
+	startErr   error
+	stopped    bool
+	stopCalls  int
 }
 
 func (f *fakeCopilot) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan copilot.RawEvent, func(), error) {
 	if f.startErr != nil {
 		return "", nil, nil, f.startErr
 	}
-	f.prompt = prompt
-	f.repoPath = repoPath
-	stop := func() { f.stopped = true }
-	return f.sessionID, f.events, stop, nil
+
+	f.prompts = append(f.prompts, prompt)
+	f.repoPaths = append(f.repoPaths, repoPath)
+
+	sessionID := f.sessionID
+	if len(f.sessionIDs) > 0 {
+		sessionID = f.sessionIDs[0]
+		f.sessionIDs = f.sessionIDs[1:]
+	}
+
+	events := f.events
+	if len(f.eventQueue) > 0 {
+		events = f.eventQueue[0]
+		f.eventQueue = f.eventQueue[1:]
+	}
+	if events == nil {
+		events = closedChan()
+	}
+
+	stop := func() {
+		f.stopped = true
+		f.stopCalls++
+	}
+	return sessionID, events, stop, nil
 }
 
 type fakeTracker struct {

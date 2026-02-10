@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
@@ -15,17 +16,19 @@ import (
 // VerificationTask implements ExecutableTask by delegating to
 // executeTaskWithStructuredOutput using the configured verification prompt.
 type VerificationTask struct {
+	cfg           config.Config
 	executionTask *ExecutionTask
-	basePrompt    string
+	instruction   string
 	exec          func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
 // NewVerificationTask constructs a VerificationTask bound to an ExecutionTask
 // reference and a verification prompt.
-func NewVerificationTask(executionTask *ExecutionTask, basePrompt string) *VerificationTask {
+func NewVerificationTask(cfg config.Config, executionTask *ExecutionTask, instruction string) *VerificationTask {
 	return &VerificationTask{
+		cfg:           cfg,
 		executionTask: executionTask,
-		basePrompt:    basePrompt,
+		instruction:   strings.TrimSpace(instruction),
 		exec:          executeTaskWithStructuredOutput,
 	}
 }
@@ -38,6 +41,14 @@ func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, ta
 	}
 	if t.exec == nil {
 		t.exec = executeTaskWithStructuredOutput
+	}
+	if t.cfg == nil {
+		return storage.TaskRunStatusFailed, "", fmt.Errorf("config is nil")
+	}
+
+	basePrompt, err := t.cfg.Get(config.VerificationTaskPromptKey)
+	if err != nil {
+		return storage.TaskRunStatusFailed, "", fmt.Errorf("get verification task prompt: %w", err)
 	}
 
 	repoPath := strings.TrimSpace(t.executionTask.repoPath)
@@ -58,7 +69,7 @@ func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, ta
 		now = func() time.Time { return time.Now().UTC() }
 	}
 
-	prompt := strings.TrimSpace(t.basePrompt)
+	prompt := buildPrompt(basePrompt, t.instruction)
 
 	return t.exec(ctx, t.executionTask.copilot, t.executionTask.storage, notifier, logger, repoPath, newRunID, now, batch, taskID, epicID, prompt)
 }

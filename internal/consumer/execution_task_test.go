@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
@@ -22,10 +23,12 @@ func TestExecutionTaskBuildsPromptWithComments(t *testing.T) {
 		},
 	}
 
+	cfg := stubConfig{config.ExecutionTaskPromptKey: "base prompt"}
+
 	var capturedPrompt string
 	execCalls := 0
 
-	task := NewExecutionTask(tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "base prompt")
+	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "task instruction")
 	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error) {
 		execCalls++
 		capturedPrompt = prompt
@@ -44,12 +47,13 @@ func TestExecutionTaskBuildsPromptWithComments(t *testing.T) {
 	require.Equal(t, 1, execCalls)
 
 	require.Equal(t, []string{"task-1"}, tr.refs)
-	require.Equal(t, "base prompt\n\nTracker comments:\n- Alice: hello\n- Bob: second", capturedPrompt)
+	require.Equal(t, "base prompt\n\ntask instruction\n\nTracker comments:\n- Alice: hello\n- Bob: second", capturedPrompt)
 }
 
 func TestExecutionTaskWithoutCommentsUsesBasePrompt(t *testing.T) {
 	tr := &stubExecutionTracker{}
-	task := NewExecutionTask(tr, nil, nil, notify.Noop{}, zap.NewNop(), " /repo ", "solo prompt")
+	cfg := stubConfig{config.ExecutionTaskPromptKey: "solo prompt"}
+	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), " /repo ", "   ")
 
 	var prompt string
 	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, p string) (storage.TaskRunStatus, error) {
@@ -68,7 +72,8 @@ func TestExecutionTaskWithoutCommentsUsesBasePrompt(t *testing.T) {
 
 func TestExecutionTaskPropagatesFetchError(t *testing.T) {
 	tr := &stubExecutionTracker{err: errors.New("boom")}
-	task := NewExecutionTask(tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "base")
+	cfg := stubConfig{config.ExecutionTaskPromptKey: "base"}
+	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "base instruction")
 
 	called := false
 	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error) {

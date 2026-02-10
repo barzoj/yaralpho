@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
@@ -17,21 +18,22 @@ var executeTaskFunc = executeTask
 
 // ExecutionTask implements ExecutableTask by assembling prompts and delegating to executeTask.
 type ExecutionTask struct {
-	tracker    tracker.Tracker
-	copilot    copilot.Client
-	storage    storage.Storage
-	notifier   notify.Notifier
-	logger     *zap.Logger
-	repoPath   string
-	basePrompt string
-	newRunID   func() string
-	now        func() time.Time
-	exec       func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error)
+	cfg         config.Config
+	tracker     tracker.Tracker
+	copilot     copilot.Client
+	storage     storage.Storage
+	notifier    notify.Notifier
+	logger      *zap.Logger
+	repoPath    string
+	instruction string
+	newRunID    func() string
+	now         func() time.Time
+	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error)
 }
 
 // NewExecutionTask constructs an ExecutionTask with sensible defaults for logger,
 // run ID generation, and clock.
-func NewExecutionTask(tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, basePrompt string) *ExecutionTask {
+func NewExecutionTask(cfg config.Config, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, instruction string) *ExecutionTask {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -40,13 +42,14 @@ func NewExecutionTask(tr tracker.Tracker, cp copilot.Client, st storage.Storage,
 	}
 
 	return &ExecutionTask{
-		tracker:    tr,
-		copilot:    cp,
-		storage:    st,
-		notifier:   nt,
-		logger:     logger,
-		repoPath:   strings.TrimSpace(repoPath),
-		basePrompt: basePrompt,
+		cfg:         cfg,
+		tracker:     tr,
+		copilot:     cp,
+		storage:     st,
+		notifier:    nt,
+		logger:      logger,
+		repoPath:    strings.TrimSpace(repoPath),
+		instruction: strings.TrimSpace(instruction),
 		newRunID: func() string {
 			return fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 		},
@@ -60,12 +63,21 @@ func NewExecutionTask(tr tracker.Tracker, cp copilot.Client, st storage.Storage,
 // Execute fetches tracker comments, builds a comment-aware prompt, and delegates
 // execution to executeTask.
 func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskID, epicID string) (storage.TaskRunStatus, string, error) {
+	if t.cfg == nil {
+		return storage.TaskRunStatusFailed, "", fmt.Errorf("config is nil")
+	}
+
+	basePrompt, err := t.cfg.Get(config.ExecutionTaskPromptKey)
+	if err != nil {
+		return storage.TaskRunStatusFailed, "", fmt.Errorf("get execution task prompt: %w", err)
+	}
+
 	comments, err := t.tracker.FetchComments(ctx, taskID)
 	if err != nil {
 		return storage.TaskRunStatusFailed, "", fmt.Errorf("fetch tracker comments: %w", err)
 	}
 
-	prompt := strings.TrimSpace(t.basePrompt)
+	prompt := buildPrompt(basePrompt, t.instruction)
 	if len(comments) > 0 {
 		var b strings.Builder
 		if prompt != "" {

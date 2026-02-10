@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/queue"
@@ -35,6 +36,7 @@ func EncodeQueueItem(item QueueItem) (string, error) {
 // Worker consumes queue items and orchestrates task runs via Copilot while
 // persisting progress and emitting notifications.
 type Worker struct {
+	cfg      config.Config
 	queue    queue.Queue
 	tracker  tracker.Tracker
 	copilot  copilot.Client
@@ -48,7 +50,7 @@ type Worker struct {
 
 // NewWorker constructs a Worker with sensible defaults for logger, notifier,
 // clock, and run ID generation.
-func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, repoPath string, logger *zap.Logger) *Worker {
+func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) *Worker {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -57,6 +59,7 @@ func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.
 	}
 
 	return &Worker{
+		cfg:      cfg,
 		queue:    q,
 		tracker:  tr,
 		copilot:  cp,
@@ -131,13 +134,25 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 	}
 
 	if !isEpic {
-		status, finalErr := w.executeTask(ctx, batch, item.TaskRef, "", fmt.Sprintf("Work on task %s", item.TaskRef))
-		if status == storage.TaskRunStatusSucceeded {
+		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
+		execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
+		execTask.newRunID = w.newRunID
+		execTask.now = w.now
+
+		status, _, finalErr := execTask.Execute(ctx, batch, item.TaskRef, "")
+		if status != storage.TaskRunStatusSucceeded {
+			return finalErr
+		}
+
+		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
+		verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
+		verifyStatus, _, verifyErr := verifyTask.Execute(ctx, batch, item.TaskRef, "")
+		if verifyStatus == storage.TaskRunStatusSucceeded {
 			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
 			return nil
 		}
 
-		return finalErr
+		return verifyErr
 	}
 
 	for {
@@ -156,17 +171,25 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 			return nil
 		}
 
-		status, finalErr := w.executeTask(ctx, batch, child, item.TaskRef, fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef))
+		execInstruction := fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef)
+		execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
+		execTask.newRunID = w.newRunID
+		execTask.now = w.now
+
+		status, _, finalErr := execTask.Execute(ctx, batch, child, item.TaskRef)
 		runs = append(runs, storage.TaskRun{TaskRef: child})
 
 		if status != storage.TaskRunStatusSucceeded {
 			return finalErr
 		}
-	}
-}
 
-func (w *Worker) executeTask(ctx context.Context, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, error) {
-	return executeTask(ctx, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, w.newRunID, w.now, batch, runRef, epicRef, prompt)
+		verifyInstruction := fmt.Sprintf("Verify task %s", child)
+		verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
+		verifyStatus, _, verifyErr := verifyTask.Execute(ctx, batch, child, item.TaskRef)
+		if verifyStatus != storage.TaskRunStatusSucceeded {
+			return verifyErr
+		}
+	}
 }
 
 func isSessionIdleEvent(evt copilot.RawEvent) bool {
@@ -199,4 +222,18 @@ func firstAvailableChild(children []string, runs []storage.TaskRun) (string, boo
 		}
 	}
 	return "", false
+}
+
+func buildPrompt(basePrompt, fallback string) string {
+	basePrompt = strings.TrimSpace(basePrompt)
+	fallback = strings.TrimSpace(fallback)
+
+	switch {
+	case basePrompt != "" && fallback != "":
+		return fmt.Sprintf("%s\n\n%s", basePrompt, fallback)
+	case basePrompt != "":
+		return basePrompt
+	default:
+		return fallback
+	}
 }

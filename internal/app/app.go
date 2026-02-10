@@ -92,7 +92,7 @@ func Build(ctx context.Context, logger *zap.Logger, cfg config.Config) (*App, er
 	}
 
 	cp := copilot.NewGitHub(logger)
-	cons := consumer.NewWorker(q, tr, cp, st, nt, repoPath, logger)
+	cons := consumer.NewWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
 
 	return New(logger, cfg, st, q, tr, nt, cp, cons)
 }
