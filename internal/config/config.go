@@ -19,19 +19,27 @@ type Config interface {
 
 // Keys used throughout the application. They mirror the expected env vars.
 const (
-	MongoURIKey        = "YARALPHO_MONGODB_URI"
-	MongoDBKey         = "YARALPHO_MONGODB_DB"
-	RepoPathKey        = "YARALPHO_REPO_PATH"
-	BdRepoKey          = "YARALPHO_BD_REPO"
-	PortKey            = "YARALPHO_PORT"
-	SlackWebhookKey    = "YARALPHO_SLACK_WEBHOOK_URL"
-	CopilotTokenKey    = "COPILOT_GITHUB_TOKEN"
-	GhTokenKey         = "GH_TOKEN"
-	GithubTokenKey     = "GITHUB_TOKEN"
-	ConfigPathOverride = "RALPH_CONFIG"
+	MongoURIKey               = "YARALPHO_MONGODB_URI"
+	MongoDBKey                = "YARALPHO_MONGODB_DB"
+	RepoPathKey               = "YARALPHO_REPO_PATH"
+	BdRepoKey                 = "YARALPHO_BD_REPO"
+	PortKey                   = "YARALPHO_PORT"
+	SlackWebhookKey           = "YARALPHO_SLACK_WEBHOOK_URL"
+	CopilotTokenKey           = "COPILOT_GITHUB_TOKEN"
+	GhTokenKey                = "GH_TOKEN"
+	GithubTokenKey            = "GITHUB_TOKEN"
+	MaxRetriesKey             = "YARALPHO_MAX_RETRIES"
+	ExecutionTaskPromptKey    = "YARALPHO_EXECUTION_TASK_PROMPT"
+	VerificationTaskPromptKey = "YARALPHO_VERIFICATION_TASK_PROMPT"
+	ConfigPathOverride        = "RALPH_CONFIG"
 )
 
-const defaultConfigPath = "config.json"
+const (
+	defaultConfigPath             = "config.json"
+	defaultMaxRetries             = "5"
+	defaultExecutionTaskPrompt    = "TODO: execution task prompt"
+	defaultVerificationTaskPrompt = "TODO: verification task prompt"
+)
 
 var requiredKeys = []string{
 	MongoURIKey,
@@ -86,6 +94,9 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 		CopilotTokenKey,
 		GhTokenKey,
 		GithubTokenKey,
+		MaxRetriesKey,
+		ExecutionTaskPromptKey,
+		VerificationTaskPromptKey,
 	} {
 		if val, ok := lookupEnv(key); ok {
 			values[key] = val
@@ -103,6 +114,16 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 		values[GhTokenKey],
 		values[GithubTokenKey],
 	)
+
+	if strings.TrimSpace(values[MaxRetriesKey]) == "" {
+		values[MaxRetriesKey] = defaultMaxRetries
+	}
+	if strings.TrimSpace(values[ExecutionTaskPromptKey]) == "" {
+		values[ExecutionTaskPromptKey] = defaultExecutionTaskPrompt
+	}
+	if strings.TrimSpace(values[VerificationTaskPromptKey]) == "" {
+		values[VerificationTaskPromptKey] = defaultVerificationTaskPrompt
+	}
 
 	missing := missingKeys(values, requiredKeys)
 	if len(missing) > 0 {

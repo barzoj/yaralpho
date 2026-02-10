@@ -20,7 +20,10 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
         "YARALPHO_BD_REPO": "json-bd",
         "YARALPHO_PORT": "7000",
         "GITHUB_TOKEN": "json-gh",
-        "YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json"
+        "YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json",
+        "YARALPHO_MAX_RETRIES": "3",
+        "YARALPHO_EXECUTION_TASK_PROMPT": "json execution",
+        "YARALPHO_VERIFICATION_TASK_PROMPT": "json verification"
     }`)
 	require.NoError(t, os.WriteFile(file.Name(), content, 0o644))
 
@@ -29,6 +32,9 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	t.Setenv(PortKey, "9090")
 	t.Setenv(GhTokenKey, "env-gh-token")
 	t.Setenv(SlackWebhookKey, "https://example.com/env")
+	t.Setenv(MaxRetriesKey, "7")
+	t.Setenv(ExecutionTaskPromptKey, "env execution prompt")
+	t.Setenv(VerificationTaskPromptKey, "env verification prompt")
 
 	cfg, err := Load(zap.NewExample())
 	require.NoError(t, err)
@@ -48,6 +54,18 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	slack, err := cfg.Get(SlackWebhookKey)
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com/env", slack)
+
+	maxRetries, err := cfg.Get(MaxRetriesKey)
+	require.NoError(t, err)
+	require.Equal(t, "7", maxRetries)
+
+	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
+	require.NoError(t, err)
+	require.Equal(t, "env execution prompt", execPrompt)
+
+	verifyPrompt, err := cfg.Get(VerificationTaskPromptKey)
+	require.NoError(t, err)
+	require.Equal(t, "env verification prompt", verifyPrompt)
 }
 
 func TestPanicOnMissingRequired(t *testing.T) {
@@ -64,6 +82,11 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	t.Setenv(RepoPathKey, "/repo")
 	t.Setenv(BdRepoKey, "bd/repo")
 	t.Setenv(CopilotTokenKey, "token")
+	t.Setenv(PortKey, "")
+	t.Setenv(SlackWebhookKey, "")
+	t.Setenv(MaxRetriesKey, "")
+	t.Setenv(ExecutionTaskPromptKey, "")
+	t.Setenv(VerificationTaskPromptKey, "")
 
 	var cfg Config
 	require.NotPanics(t, func() {
@@ -78,4 +101,16 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	port, err := cfg.Get(PortKey)
 	require.NoError(t, err)
 	require.Equal(t, "8080", port)
+
+	maxRetries, err := cfg.Get(MaxRetriesKey)
+	require.NoError(t, err)
+	require.Equal(t, "5", maxRetries)
+
+	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
+	require.NoError(t, err)
+	require.Equal(t, "TODO: execution task prompt", execPrompt)
+
+	verifyPrompt, err := cfg.Get(VerificationTaskPromptKey)
+	require.NoError(t, err)
+	require.Equal(t, "TODO: verification task prompt", verifyPrompt)
 }
