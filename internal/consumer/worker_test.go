@@ -70,12 +70,12 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	require.Len(t, st.sessionEvents, 2)
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 
-	require.Len(t, nt.finished, 5)
+	require.Len(t, nt.finished, 4)
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "task_started"}, nt.finished[0])
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "attempt_started (attempt=1)"}, nt.finished[1])
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[2])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[3])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "verification_succeeded (attempt=1)"}, nt.finished[4])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "", taskRef: "task-1", status: "verification_succeeded (attempt=1)"}, nt.finished[3])
+	require.Equal(t, []string{"b1"}, nt.batchIdle)
 }
 
 func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
