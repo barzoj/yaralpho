@@ -49,40 +49,6 @@ type Worker struct {
 	newRunID func() string
 }
 
-// filteredNotifier forwards notifications to the underlying Notifier while
-// optionally suppressing succeeded events. This keeps verification runs from
-// emitting duplicate success notifications while still forwarding errors.
-type filteredNotifier struct {
-	notify.Notifier
-	suppressSucceeded bool
-}
-
-func (n filteredNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
-	if n.Notifier == nil {
-		return nil
-	}
-
-	if n.suppressSucceeded && strings.EqualFold(status, string(storage.TaskRunStatusSucceeded)) {
-		return nil
-	}
-
-	return n.Notifier.NotifyTaskFinished(ctx, batchID, runID, taskRef, status, commitHash)
-}
-
-func (n filteredNotifier) NotifyBatchIdle(ctx context.Context, batchID string) error {
-	if n.Notifier == nil {
-		return nil
-	}
-	return n.Notifier.NotifyBatchIdle(ctx, batchID)
-}
-
-func (n filteredNotifier) NotifyError(ctx context.Context, batchID, runID, taskRef string, err error) error {
-	if n.Notifier == nil {
-		return nil
-	}
-	return n.Notifier.NotifyError(ctx, batchID, runID, taskRef, err)
-}
-
 // NewWorker constructs a Worker with sensible defaults for logger, notifier,
 // clock, and run ID generation.
 func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) *Worker {
@@ -198,7 +164,6 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 		if verifyStatus == storage.TaskRunStatusSucceeded {
 			w.notifyTaskEvent(ctx, item.BatchID, item.TaskRef, "verification_succeeded", fmt.Sprintf("attempt=%d", attempts))
 			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
-			_ = w.notifier.NotifyBatchIdle(ctx, item.BatchID)
 			return nil
 		}
 
@@ -269,7 +234,6 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, tas
 	}
 
 	verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
-	verifyTask.executionTask.notifier = filteredNotifier{Notifier: w.notifier, suppressSucceeded: true}
 	verifyStatus, output, verifyErr := verifyTask.Execute(ctx, batch, taskRef, parentRef)
 	if verifyErr != nil {
 		w.logger.Warn("verification task execution error", zap.Error(verifyErr), zap.String("task_ref", taskRef))
