@@ -127,6 +127,24 @@ eventLoop:
 	return status, finalErr
 }
 
+func executeTaskWithStructuredOutput(
+	ctx context.Context,
+	cp copilot.Client,
+	st storage.Storage,
+	nt notify.Notifier,
+	logger *zap.Logger,
+	repoPath string,
+	newRunID func() string,
+	now func() time.Time,
+	batch *storage.Batch,
+	runRef,
+	epicRef,
+	prompt string,
+) (storage.TaskRunStatus, string, error) {
+	status, err := executeTask(ctx, cp, st, nt, logger, repoPath, newRunID, now, batch, runRef, epicRef, prompt)
+	return status, "", err
+}
+
 func setBatchStatus(ctx context.Context, st storage.Storage, logger *zap.Logger, batch *storage.Batch, status storage.BatchStatus) {
 	if batch == nil {
 		return

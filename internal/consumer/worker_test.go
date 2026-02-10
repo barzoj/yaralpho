@@ -252,6 +252,75 @@ func TestExecuteTask_StartSessionErrorSetsFailed(t *testing.T) {
 	require.Len(t, nt.errors, 1)
 }
 
+func TestExecuteTaskWithStructuredOutput_Success(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	cp := &fakeCopilot{events: closedChan(), sessionID: "s-structured"}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 8, 18, 0, 0, 0, time.UTC)
+	status, resp, err := executeTaskWithStructuredOutput(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-structured" },
+		func() time.Time { return now },
+		&batch,
+		"task-structured",
+		"epic-structured",
+		"prompt",
+	)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+	require.Empty(t, resp)
+
+	run := st.runs["run-structured"]
+	require.Equal(t, "task-structured", run.TaskRef)
+	require.Equal(t, "epic-structured", run.EpicRef)
+	require.Equal(t, &now, run.FinishedAt)
+}
+
+func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	cp := &fakeCopilot{startErr: errors.New("structured boom")}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 8, 19, 0, 0, 0, time.UTC)
+	status, resp, err := executeTaskWithStructuredOutput(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-structured-fail" },
+		func() time.Time { return now },
+		&batch,
+		"task-structured-fail",
+		"",
+		"prompt",
+	)
+
+	require.Error(t, err)
+	require.Equal(t, storage.TaskRunStatusFailed, status)
+	require.Empty(t, resp)
+
+	run := st.runs["run-structured-fail"]
+	require.Equal(t, storage.TaskRunStatusFailed, run.Status)
+	require.Equal(t, storage.BatchStatusFailed, st.batches["b1"].Status)
+	require.Len(t, nt.errors, 1)
+}
+
 func TestSetBatchStatus(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
