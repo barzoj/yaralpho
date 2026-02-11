@@ -125,14 +125,21 @@ func TestRunEventsLiveHandlerBackfillsFromCursor(t *testing.T) {
 			BatchID:    "batch-1",
 			RunID:      "run-1",
 			SessionID:  "session-1",
-			Event:      map[string]any{"type": "log", "data": "old"},
+			Event:      map[string]any{"type": "log", "data": "newer"},
+			IngestedAt: t2,
+		},
+		{
+			BatchID:    "batch-1",
+			RunID:      "run-1",
+			SessionID:  "session-1",
+			Event:      map[string]any{"type": "log", "data": "oldest"},
 			IngestedAt: t1,
 		},
 		{
 			BatchID:    "batch-1",
 			RunID:      "run-1",
 			SessionID:  "session-1",
-			Event:      map[string]any{"type": "log", "data": "newer"},
+			Event:      map[string]any{"type": "log", "data": "dup-newer"},
 			IngestedAt: t2,
 		},
 	}
@@ -208,7 +215,15 @@ func TestRunEventsLiveHandlerClosesOnSubscribeError(t *testing.T) {
 	}
 	defer conn.Close()
 
-	_, _, readErr := conn.ReadMessage()
+	_, msg, readErr := conn.ReadMessage()
+	require.NoError(t, readErr)
+
+	var env eventEnvelope
+	require.NoError(t, json.Unmarshal(msg, &env))
+	require.Equal(t, envelopeTypeError, env.Type)
+	require.Contains(t, env.Error, "subscribe failed")
+
+	_, _, readErr = conn.ReadMessage()
 	var closeErr *websocket.CloseError
 	require.ErrorAs(t, readErr, &closeErr)
 	require.Equal(t, websocket.CloseInternalServerErr, closeErr.Code)

@@ -18,6 +18,8 @@ const (
 	wsWriteTimeout = 10 * time.Second
 )
 
+// eventEnvelope encodes WebSocket frames for live events using a typed schema:
+// event/error/heartbeat with optional cursor for ordering.
 type eventEnvelope struct {
 	Type   string                `json:"type"`
 	Cursor string                `json:"cursor,omitempty"`
@@ -26,7 +28,9 @@ type eventEnvelope struct {
 }
 
 const (
-	envelopeTypeEvent = "event"
+	envelopeTypeEvent     = "event"
+	envelopeTypeError     = "error"
+	envelopeTypeHeartbeat = "heartbeat"
 )
 
 // runEventsLiveHandler upgrades to websocket and streams session events for a run.
@@ -113,6 +117,7 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				zap.String("session_id", run.SessionID),
 			)
 		}
+		_ = writeErrorEnvelope(conn, "subscribe failed")
 		writeClose(conn, websocket.CloseInternalServerErr, "subscribe failed", a.logger, run)
 		return
 	}
@@ -129,6 +134,7 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				zap.String("session_id", run.SessionID),
 			)
 		}
+		_ = writeErrorEnvelope(conn, "list session events failed")
 		writeClose(conn, websocket.CloseInternalServerErr, "list session events failed", a.logger, run)
 		return
 	}
@@ -230,6 +236,18 @@ func writeEventEnvelope(conn *websocket.Conn, evt storage.SessionEvent) error {
 		Type:   envelopeTypeEvent,
 		Cursor: evt.IngestedAt.UTC().Format(time.RFC3339Nano),
 		Event:  &evt,
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+	return conn.WriteJSON(payload)
+}
+
+func writeErrorEnvelope(conn *websocket.Conn, msg string) error {
+	if msg == "" {
+		msg = "unknown error"
+	}
+	payload := eventEnvelope{
+		Type:  envelopeTypeError,
+		Error: msg,
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 	return conn.WriteJSON(payload)
