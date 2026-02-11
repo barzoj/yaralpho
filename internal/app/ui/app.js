@@ -149,6 +149,13 @@
     render: renderUnknownEvent,
   };
 
+  const ENVELOPE_TYPE_EVENT = "event";
+  const ENVELOPE_TYPE_ERROR = "error";
+  const ENVELOPE_TYPE_HEARTBEAT = "heartbeat";
+
+  let liveStreamState = null;
+  let liveUnloadCleanup = null;
+
   function setStatus(text, type = "info") {
     statusEl.textContent = text;
     statusEl.className = `status ${type}`;
@@ -282,6 +289,33 @@
 
   function filterRenderableEvents(events) {
     return (events || []).filter(shouldRenderEvent);
+  }
+
+  function getIngestedAt(evt) {
+    return evt?.ingested_at || evt?.ingestedAt || "";
+  }
+
+  function eventKeyFromEvent(evt) {
+    return [
+      evt?.session_id || evt?.sessionId || "",
+      evt?.run_id || evt?.runId || "",
+      evt?.batch_id || evt?.batchId || "",
+      getIngestedAt(evt) || "",
+    ].join("|");
+  }
+
+  function deriveLatestIngested(events) {
+    let latest = "";
+    for (const evt of events || []) {
+      const ts = getIngestedAt(evt);
+      if (!ts) continue;
+      const tsDate = new Date(ts);
+      const latestDate = latest ? new Date(latest) : null;
+      if (!latest || (latestDate && tsDate > latestDate)) {
+        latest = ts;
+      }
+    }
+    return latest;
   }
 
   function getEventData(evt) {
@@ -832,7 +866,171 @@
     return wrapper;
   }
 
+  function formatEventsInfoText(visibleCount, totalCount, streamingHiddenCount, truncatedCount) {
+    const baseLabel = `${visibleCount} of ${totalCount} events shown`;
+    const hiddenMessages = [];
+    if (streamingHiddenCount > 0) {
+      hiddenMessages.push(`${streamingHiddenCount} streaming deltas hidden`);
+    }
+    if (truncatedCount > 0) {
+      hiddenMessages.push(`${truncatedCount} truncated by server`);
+    }
+    if (hiddenMessages.length > 0) {
+      return `${baseLabel} (${hiddenMessages.join("; ")})`;
+    }
+    return `${visibleCount} event${visibleCount === 1 ? "" : "s"} loaded`;
+  }
+
+  function updateEventsUI(state) {
+    if (!state || !state.infoEl || !state.eventsContainer) return;
+
+    const visibleEvents = filterRenderableEvents(state.events);
+    const totalCount = Math.max(
+      Number.isFinite(Number(state.totalCount)) ? Number(state.totalCount) : 0,
+      state.events.length
+    );
+    const streamingHiddenCount = Math.max(0, state.events.length - visibleEvents.length);
+    const truncatedCount = Math.max(0, totalCount - state.events.length);
+
+    state.infoEl.textContent = formatEventsInfoText(
+      visibleEvents.length,
+      totalCount,
+      streamingHiddenCount,
+      truncatedCount
+    );
+
+    const nextContainer = renderEventsList(visibleEvents);
+    state.eventsContainer.replaceWith(nextContainer);
+    state.eventsContainer = nextContainer;
+    state.totalCount = totalCount;
+  }
+
+  function resetLiveStream(reason) {
+    if (liveStreamState?.socket) {
+      try {
+        liveStreamState.socket.close(1000, reason || "closing");
+      } catch (_) {
+        // noop
+      }
+    }
+    if (liveUnloadCleanup) {
+      liveUnloadCleanup();
+      liveUnloadCleanup = null;
+    }
+    liveStreamState = null;
+  }
+
+  function ensureUnloadCleanup() {
+    if (liveUnloadCleanup) return;
+    const handler = () => resetLiveStream("page unload");
+    window.addEventListener("beforeunload", handler);
+    liveUnloadCleanup = () => window.removeEventListener("beforeunload", handler);
+  }
+
+  function buildLiveURL(runId, cursor) {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    const search = cursor ? `?last_ingested=${encodeURIComponent(cursor)}` : "";
+    return `${proto}://${window.location.host}/runs/${encodeURIComponent(runId)}/events/live${search}`;
+  }
+
+  function handleLiveEnvelope(envelope) {
+    if (!liveStreamState || !envelope) return;
+
+    if (envelope.type === ENVELOPE_TYPE_EVENT && envelope.event) {
+      const evt = envelope.event;
+      const key = eventKeyFromEvent(evt);
+      if (liveStreamState.seenKeys.has(key)) {
+        return;
+      }
+      liveStreamState.events.push(evt);
+      liveStreamState.seenKeys.add(key);
+      if (envelope.cursor) {
+        liveStreamState.cursor = envelope.cursor;
+      } else if (getIngestedAt(evt)) {
+        liveStreamState.cursor = getIngestedAt(evt);
+      }
+      liveStreamState.totalCount = Math.max(
+        (liveStreamState.totalCount ?? liveStreamState.events.length) + 1,
+        liveStreamState.events.length
+      );
+      updateEventsUI(liveStreamState);
+      return;
+    }
+
+    if (envelope.type === ENVELOPE_TYPE_HEARTBEAT) {
+      if (envelope.cursor) {
+        liveStreamState.cursor = envelope.cursor;
+      }
+      return;
+    }
+
+    if (envelope.type === ENVELOPE_TYPE_ERROR) {
+      setStatus(`Live stream error: ${envelope.error || "unknown error"}`, "warning");
+      console.error("[live events] error", {
+        runId: liveStreamState.runId,
+        batchId: liveStreamState.batchId,
+        error: envelope.error,
+      });
+    }
+  }
+
+  function connectLiveStream(runId, batchId) {
+    if (!runId || !liveStreamState) return;
+
+    const url = buildLiveURL(runId, liveStreamState.cursor);
+    if (liveStreamState.socket) {
+      try {
+        liveStreamState.socket.close(1000, "restarting");
+      } catch (_) {
+        // noop
+      }
+    }
+
+    console.info("[live events] connecting", {
+      runId,
+      batchId,
+      cursor: liveStreamState.cursor || "(none)",
+      url,
+    });
+
+    const socket = new WebSocket(url);
+    liveStreamState.socket = socket;
+    ensureUnloadCleanup();
+
+    socket.addEventListener("open", () => {
+      console.info("[live events] connected", { runId, batchId });
+    });
+
+    socket.addEventListener("message", (event) => {
+      try {
+        const payload = typeof event.data === "string" ? JSON.parse(event.data) : null;
+        if (!payload) return;
+        handleLiveEnvelope(payload);
+      } catch (err) {
+        console.error("[live events] failed to parse message", err);
+      }
+    });
+
+    socket.addEventListener("error", (err) => {
+      setStatus("Live stream error (see console)", "warning");
+      console.error("[live events] socket error", err);
+    });
+
+    socket.addEventListener("close", (evt) => {
+      if (liveStreamState && liveStreamState.socket === socket) {
+        liveStreamState.socket = null;
+      }
+      console.info("[live events] closed", {
+        runId,
+        batchId,
+        code: evt.code,
+        reason: evt.reason,
+      });
+    });
+  }
+
   async function renderRunView(runId, batchIdFromQuery) {
+    resetLiveStream("switching view");
     viewTitle.textContent = `Run ${runId}`;
     setStatus("Loading run…", "loading");
     clearContent();
@@ -890,21 +1088,35 @@
       : rawEvents.length;
     const streamingHiddenCount = Math.max(0, rawEvents.length - visibleEvents.length);
     const truncatedCount = Math.max(0, totalCount - rawEvents.length);
-    const hiddenMessages = [];
-    if (streamingHiddenCount > 0) {
-      hiddenMessages.push(`${streamingHiddenCount} streaming deltas hidden`);
-    }
-    if (truncatedCount > 0) {
-      hiddenMessages.push(`${truncatedCount} truncated by server`);
-    }
-    const baseLabel = `${visibleEvents.length} of ${totalCount} events shown`;
-    info.textContent =
-      hiddenMessages.length > 0
-        ? `${baseLabel} (${hiddenMessages.join("; ")})`
-        : `${visibleEvents.length} event${visibleEvents.length === 1 ? "" : "s"} loaded`;
+    info.textContent = formatEventsInfoText(
+      visibleEvents.length,
+      totalCount,
+      streamingHiddenCount,
+      truncatedCount
+    );
     contentEl.appendChild(info);
 
-    contentEl.appendChild(renderEventsList(visibleEvents));
+    const eventsContainer = renderEventsList(visibleEvents);
+    contentEl.appendChild(eventsContainer);
+
+    liveStreamState = {
+      runId,
+      batchId,
+      events: rawEvents.slice(),
+      totalCount,
+      infoEl: info,
+      eventsContainer,
+      cursor: deriveLatestIngested(rawEvents),
+      seenKeys: new Set(rawEvents.map(eventKeyFromEvent)),
+      socket: null,
+    };
+
+    console.info("[live events] prepared initial state", {
+      runId,
+      batchId,
+      cursor: liveStreamState.cursor || "(none)",
+      eventCount: liveStreamState.events.length,
+    });
 
     if (eventsData.events_truncated) {
       const limitUsedRaw =
@@ -918,6 +1130,8 @@
       contentEl.appendChild(note);
     }
 
+    updateEventsUI(liveStreamState);
+    connectLiveStream(runId, batchId);
     setStatus("Run loaded", "success");
   }
 

@@ -193,7 +193,6 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				case readErrCh <- err:
 				default:
 				}
-				cancel()
 				return
 			}
 		}
