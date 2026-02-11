@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"time"
@@ -14,8 +16,23 @@ import (
 )
 
 const (
-	wsReadTimeout  = 60 * time.Second
-	wsWriteTimeout = 10 * time.Second
+	defaultWSReadTimeout  = 60 * time.Second
+	defaultWSWriteTimeout = 10 * time.Second
+	// Heartbeats (and pings) are sent on this cadence to detect stalled clients.
+	defaultWSHeartbeatInterval = 15 * time.Second
+)
+
+var (
+	wsReadTimeout       = defaultWSReadTimeout
+	wsWriteTimeout      = defaultWSWriteTimeout
+	wsHeartbeatInterval = defaultWSHeartbeatInterval
+
+	wsWriteJSON = func(conn *websocket.Conn, v any) error {
+		return conn.WriteJSON(v)
+	}
+	wsWritePingControl = func(conn *websocket.Conn, deadline time.Time) error {
+		return conn.WriteControl(websocket.PingMessage, nil, deadline)
+	}
 )
 
 // eventEnvelope encodes WebSocket frames for live events using a typed schema:
@@ -168,20 +185,56 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drain control frames to detect client disconnects.
+	readErrCh := make(chan error, 1)
 	go func() {
 		for {
 			if _, _, err := conn.NextReader(); err != nil {
+				select {
+				case readErrCh <- err:
+				default:
+				}
 				cancel()
 				return
 			}
 		}
 	}()
 
+	heartbeatTicker := time.NewTicker(wsHeartbeatInterval)
+	defer heartbeatTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			writeClose(conn, websocket.CloseNormalClosure, "context done", a.logger, run)
 			return
+		case readErr := <-readErrCh:
+			code, reason := closeReason(readErr)
+			if a.logger != nil {
+				a.logger.Info(
+					"websocket read failed",
+					zap.Error(readErr),
+					zap.String("run_id", run.ID),
+					zap.String("batch_id", run.BatchID),
+					zap.String("session_id", run.SessionID),
+				)
+			}
+			writeClose(conn, code, reason, a.logger, run)
+			return
+		case <-heartbeatTicker.C:
+			if err := sendHeartbeat(conn, cursor); err != nil {
+				if a.logger != nil {
+					a.logger.Info(
+						"websocket heartbeat failed",
+						zap.Error(err),
+						zap.String("run_id", run.ID),
+						zap.String("batch_id", run.BatchID),
+						zap.String("session_id", run.SessionID),
+					)
+				}
+				cancel()
+				writeClose(conn, websocket.CloseGoingAway, "heartbeat send failed", a.logger, run)
+				return
+			}
 		case evt, ok := <-sub.Events:
 			if !ok {
 				writeClose(conn, websocket.CloseNormalClosure, "subscription closed", a.logger, run)
@@ -238,7 +291,7 @@ func writeEventEnvelope(conn *websocket.Conn, evt storage.SessionEvent) error {
 		Event:  &evt,
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-	return conn.WriteJSON(payload)
+	return wsWriteJSON(conn, payload)
 }
 
 func writeErrorEnvelope(conn *websocket.Conn, msg string) error {
@@ -250,7 +303,24 @@ func writeErrorEnvelope(conn *websocket.Conn, msg string) error {
 		Error: msg,
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-	return conn.WriteJSON(payload)
+	return wsWriteJSON(conn, payload)
+}
+
+func writeHeartbeatEnvelope(conn *websocket.Conn, cursor time.Time) error {
+	payload := eventEnvelope{Type: envelopeTypeHeartbeat}
+	if !cursor.IsZero() {
+		payload.Cursor = cursor.UTC().Format(time.RFC3339Nano)
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+	return wsWriteJSON(conn, payload)
+}
+
+func sendHeartbeat(conn *websocket.Conn, cursor time.Time) error {
+	if err := writeHeartbeatEnvelope(conn, cursor); err != nil {
+		return err
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+	return wsWritePingControl(conn, time.Now().Add(wsWriteTimeout))
 }
 
 func eventKey(evt storage.SessionEvent) string {
@@ -278,4 +348,19 @@ func writeClose(conn *websocket.Conn, code int, reason string, logger *zap.Logge
 			zap.String("session_id", run.SessionID),
 		)
 	}
+}
+
+func closeReason(err error) (int, string) {
+	if err == nil {
+		return websocket.CloseGoingAway, "client disconnected"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return websocket.CloseGoingAway, "pong timeout"
+	}
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		return closeErr.Code, closeErr.Text
+	}
+	return websocket.CloseGoingAway, "client read failed"
 }

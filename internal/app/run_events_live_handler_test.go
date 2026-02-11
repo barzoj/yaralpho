@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -230,6 +231,106 @@ func TestRunEventsLiveHandlerClosesOnSubscribeError(t *testing.T) {
 	require.Contains(t, closeErr.Text, "subscribe failed")
 }
 
+func TestRunEventsLiveHandlerClosesOnHeartbeatTimeout(t *testing.T) {
+	oldReadTimeout := wsReadTimeout
+	oldHeartbeat := wsHeartbeatInterval
+	wsReadTimeout = 100 * time.Millisecond
+	wsHeartbeatInterval = 20 * time.Millisecond
+	t.Cleanup(func() {
+		wsReadTimeout = oldReadTimeout
+		wsHeartbeatInterval = oldHeartbeat
+	})
+
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+	app.logger = zap.NewExample()
+
+	st.runs["run-1"] = storage.TaskRun{
+		ID:        "run-1",
+		BatchID:   "batch-1",
+		SessionID: "session-1",
+	}
+
+	server := httptest.NewServer(app.Router())
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/runs/run-1/events/live"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		require.Failf(t, "handshake failed", "status=%v body=%s err=%v", statusFromResponse(resp), bodyFromResponse(resp), err)
+	}
+	defer conn.Close()
+
+	// Drop pongs to trigger timeout.
+	conn.SetPingHandler(func(string) error { return nil })
+	conn.SetPongHandler(func(string) error { return nil })
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	for {
+		_, _, err = conn.ReadMessage()
+		if err == nil {
+			continue
+		}
+		var closeErr *websocket.CloseError
+		require.ErrorAs(t, err, &closeErr)
+		require.Equal(t, websocket.CloseGoingAway, closeErr.Code)
+		require.Contains(t, closeErr.Text, "pong timeout")
+		return
+	}
+}
+
+func TestRunEventsLiveHandlerCleansUpOnWriteFailure(t *testing.T) {
+	oldWriteJSON := wsWriteJSON
+	wsWriteJSON = func(*websocket.Conn, any) error {
+		return errors.New("forced write failure")
+	}
+	t.Cleanup(func() { wsWriteJSON = oldWriteJSON })
+
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+	app.logger = zap.NewExample()
+	recBus := newRecordingBus()
+	app.eventBus = recBus
+
+	st.runs["run-1"] = storage.TaskRun{
+		ID:        "run-1",
+		BatchID:   "batch-1",
+		SessionID: "session-1",
+	}
+
+	server := httptest.NewServer(app.Router())
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/runs/run-1/events/live"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		require.Failf(t, "handshake failed", "status=%v body=%s err=%v", statusFromResponse(resp), bodyFromResponse(resp), err)
+	}
+	defer conn.Close()
+
+	event := storage.SessionEvent{
+		BatchID:    "batch-1",
+		RunID:      "run-1",
+		SessionID:  "session-1",
+		Event:      map[string]any{"type": "log", "data": "hello"},
+		IngestedAt: time.Now().UTC(),
+	}
+	require.NoError(t, recBus.Publish(context.Background(), event.SessionID, event))
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = conn.ReadMessage()
+	var closeErr *websocket.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, websocket.CloseGoingAway, closeErr.Code)
+	require.Contains(t, closeErr.Text, "write failed")
+
+	require.Eventually(t, func() bool {
+		return recBus.closed()
+	}, time.Second, 10*time.Millisecond)
+}
+
 type errBus struct{}
 
 func (errBus) Publish(ctx context.Context, sessionID string, evt storage.SessionEvent) error {
@@ -237,6 +338,46 @@ func (errBus) Publish(ctx context.Context, sessionID string, evt storage.Session
 }
 func (errBus) Subscribe(ctx context.Context, sessionID string) (bus.Subscription, error) {
 	return bus.Subscription{}, errors.New("subscribe failed")
+}
+
+type recordingBus struct {
+	bus bus.Bus
+
+	mu      sync.Mutex
+	lastSub bus.Subscription
+}
+
+func newRecordingBus() *recordingBus {
+	return &recordingBus{bus: bus.NewMemoryBus(bus.Config{})}
+}
+
+func (b *recordingBus) Publish(ctx context.Context, sessionID string, evt storage.SessionEvent) error {
+	return b.bus.Publish(ctx, sessionID, evt)
+}
+
+func (b *recordingBus) Subscribe(ctx context.Context, sessionID string) (bus.Subscription, error) {
+	sub, err := b.bus.Subscribe(ctx, sessionID)
+	if err == nil {
+		b.mu.Lock()
+		b.lastSub = sub
+		b.mu.Unlock()
+	}
+	return sub, err
+}
+
+func (b *recordingBus) closed() bool {
+	b.mu.Lock()
+	sub := b.lastSub
+	b.mu.Unlock()
+	if sub.Done() == nil {
+		return false
+	}
+	select {
+	case <-sub.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 func statusFromResponse(resp *http.Response) any {
