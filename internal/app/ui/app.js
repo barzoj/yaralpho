@@ -291,32 +291,40 @@
     return (events || []).filter(shouldRenderEvent);
   }
 
-  function getIngestedAt(evt) {
-    return evt?.ingested_at || evt?.ingestedAt || "";
-  }
+  const mergeHelpers = window.LiveEventsMerge || {};
 
-  function eventKeyFromEvent(evt) {
-    return [
-      evt?.session_id || evt?.sessionId || "",
-      evt?.run_id || evt?.runId || "",
-      evt?.batch_id || evt?.batchId || "",
-      getIngestedAt(evt) || "",
-    ].join("|");
-  }
+  const getIngestedAt =
+    mergeHelpers.getIngestedAt ||
+    function getIngestedAtFallback(evt) {
+      return evt?.ingested_at || evt?.ingestedAt || "";
+    };
 
-  function deriveLatestIngested(events) {
-    let latest = "";
-    for (const evt of events || []) {
-      const ts = getIngestedAt(evt);
-      if (!ts) continue;
-      const tsDate = new Date(ts);
-      const latestDate = latest ? new Date(latest) : null;
-      if (!latest || (latestDate && tsDate > latestDate)) {
-        latest = ts;
+  const eventKeyFromEvent =
+    mergeHelpers.eventKeyFromEvent ||
+    function eventKeyFromEventFallback(evt) {
+      return [
+        evt?.session_id || evt?.sessionId || "",
+        evt?.run_id || evt?.runId || "",
+        evt?.batch_id || evt?.batchId || "",
+        getIngestedAt(evt) || "",
+      ].join("|");
+    };
+
+  const deriveLatestIngested =
+    mergeHelpers.deriveLatestIngested ||
+    function deriveLatestIngestedFallback(events) {
+      let latest = "";
+      for (const evt of events || []) {
+        const ts = getIngestedAt(evt);
+        if (!ts) continue;
+        const tsDate = new Date(ts);
+        const latestDate = latest ? new Date(latest) : null;
+        if (!latest || (latestDate && tsDate > latestDate)) {
+          latest = ts;
+        }
       }
-    }
-    return latest;
-  }
+      return latest;
+    };
 
   function getEventData(evt) {
     return (evt && (evt.event?.data || evt.data)) || {};
@@ -936,32 +944,39 @@
   function handleLiveEnvelope(envelope) {
     if (!liveStreamState || !envelope) return;
 
-    if (envelope.type === ENVELOPE_TYPE_EVENT && envelope.event) {
-      const evt = envelope.event;
-      const key = eventKeyFromEvent(evt);
-      if (liveStreamState.seenKeys.has(key)) {
-        return;
+    if (mergeHelpers.mergeLiveEnvelope) {
+      const merged = mergeHelpers.mergeLiveEnvelope(liveStreamState, envelope);
+      const { changed, cursorChanged, ...rest } = merged;
+      liveStreamState = { ...liveStreamState, ...rest };
+      if (changed) {
+        updateEventsUI(liveStreamState);
+      } else if (cursorChanged) {
+        liveStreamState.cursor = merged.cursor;
       }
-      liveStreamState.events.push(evt);
-      liveStreamState.seenKeys.add(key);
-      if (envelope.cursor) {
-        liveStreamState.cursor = envelope.cursor;
-      } else if (getIngestedAt(evt)) {
-        liveStreamState.cursor = getIngestedAt(evt);
+    } else {
+      if (envelope.type === ENVELOPE_TYPE_EVENT && envelope.event) {
+        const evt = envelope.event;
+        const key = eventKeyFromEvent(evt);
+        if (liveStreamState.seenKeys.has(key)) {
+          return;
+        }
+        liveStreamState.events.push(evt);
+        liveStreamState.seenKeys.add(key);
+        if (envelope.cursor) {
+          liveStreamState.cursor = envelope.cursor;
+        } else if (getIngestedAt(evt)) {
+          liveStreamState.cursor = getIngestedAt(evt);
+        }
+        liveStreamState.totalCount = Math.max(
+          (liveStreamState.totalCount ?? liveStreamState.events.length) + 1,
+          liveStreamState.events.length
+        );
+        updateEventsUI(liveStreamState);
+      } else if (envelope.type === ENVELOPE_TYPE_HEARTBEAT) {
+        if (envelope.cursor) {
+          liveStreamState.cursor = envelope.cursor;
+        }
       }
-      liveStreamState.totalCount = Math.max(
-        (liveStreamState.totalCount ?? liveStreamState.events.length) + 1,
-        liveStreamState.events.length
-      );
-      updateEventsUI(liveStreamState);
-      return;
-    }
-
-    if (envelope.type === ENVELOPE_TYPE_HEARTBEAT) {
-      if (envelope.cursor) {
-        liveStreamState.cursor = envelope.cursor;
-      }
-      return;
     }
 
     if (envelope.type === ENVELOPE_TYPE_ERROR) {
