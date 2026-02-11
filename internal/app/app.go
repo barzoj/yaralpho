@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/bus"
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/consumer"
 	"github.com/barzoj/yaralpho/internal/copilot"
@@ -46,6 +47,7 @@ type App struct {
 	reqCounter uint64
 	startOnce  sync.Once
 	wg         sync.WaitGroup
+	eventBus   bus.Bus
 }
 
 // Build constructs the production App using concrete implementations. All
@@ -132,6 +134,12 @@ func New(logger *zap.Logger, cfg config.Config, st storage.Storage, q queue.Queu
 		copilot:  cp,
 		consumer: cons,
 		router:   router,
+	}
+
+	app.eventBus = consumer.SessionEventBus()
+	if app.eventBus == nil {
+		app.eventBus = bus.NewMemoryBus(bus.Config{Logger: logger})
+		consumer.SetSessionEventBus(app.eventBus)
 	}
 
 	app.registerRoutes()

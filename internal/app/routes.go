@@ -23,6 +23,7 @@ func (a *App) registerRoutes() {
 	a.router.HandleFunc("/batches/{id}/progress", a.batchProgressHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs", a.listRunsHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}/events", a.runEventsHandler).Methods(http.MethodGet)
+	a.router.HandleFunc("/runs/{id}/events/live", a.runEventsLiveHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}", a.runDetailHandler).Methods(http.MethodGet)
 	a.router.Handle("/app", ui.IndexHandler()).Methods(http.MethodGet)
 	a.router.Handle("/app/", ui.IndexHandler()).Methods(http.MethodGet)

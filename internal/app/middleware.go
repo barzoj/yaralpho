@@ -1,6 +1,9 @@
 package app
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -65,4 +68,11 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, fmt.Errorf("hijacker not supported")
 }

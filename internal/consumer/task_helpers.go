@@ -19,6 +19,18 @@ func setSessionEventBus(b bus.Bus) {
 	sessionEventBus = b
 }
 
+// SessionEventBus exposes the shared session event bus for consumers such as
+// HTTP handlers. It returns nil if the bus has not been initialized.
+func SessionEventBus() bus.Bus {
+	return sessionEventBus
+}
+
+// SetSessionEventBus allows callers to provide a shared session event bus that
+// the consumer will publish to and other components can subscribe from.
+func SetSessionEventBus(b bus.Bus) {
+	setSessionEventBus(b)
+}
+
 func executeTask(
 	ctx context.Context,
 	cp copilot.Client,
