@@ -5,7 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestSubscribeRegistersSubscriberWithBuffer(t *testing.T) {
@@ -90,6 +94,105 @@ func TestSessionIsolation(t *testing.T) {
 	require.NoError(t, subB.Close())
 }
 
+func TestPublishFanOutOrdering(t *testing.T) {
+	b := NewMemoryBus(Config{}).(*memoryBus)
+
+	sub1, err := b.Subscribe(context.Background(), "session-fanout")
+	require.NoError(t, err)
+	sub2, err := b.Subscribe(context.Background(), "session-fanout")
+	require.NoError(t, err)
+
+	evt1 := newEvent("session-fanout", "batch-1", "run-1")
+	evt2 := newEvent("session-fanout", "batch-1", "run-2")
+
+	require.NoError(t, b.Publish(context.Background(), "session-fanout", evt1))
+	require.NoError(t, b.Publish(context.Background(), "session-fanout", evt2))
+
+	require.Equal(t, evt1, readEvent(t, sub1.Events))
+	require.Equal(t, evt1, readEvent(t, sub2.Events))
+	require.Equal(t, evt2, readEvent(t, sub1.Events))
+	require.Equal(t, evt2, readEvent(t, sub2.Events))
+}
+
+func TestPublishIsolationAcrossSessions(t *testing.T) {
+	b := NewMemoryBus(Config{}).(*memoryBus)
+
+	subA, err := b.Subscribe(context.Background(), "session-publish-a")
+	require.NoError(t, err)
+	subB, err := b.Subscribe(context.Background(), "session-publish-b")
+	require.NoError(t, err)
+
+	evtA := newEvent("session-publish-a", "batch-a", "run-a")
+	evtB := newEvent("session-publish-b", "batch-b", "run-b")
+
+	require.NoError(t, b.Publish(context.Background(), "session-publish-a", evtA))
+	requireNoEvent(t, subB.Events)
+
+	require.NoError(t, b.Publish(context.Background(), "session-publish-b", evtB))
+	require.Equal(t, evtA, readEvent(t, subA.Events))
+	require.Equal(t, evtB, readEvent(t, subB.Events))
+}
+
+func TestPublishBlockPolicyRespectsContext(t *testing.T) {
+	b := NewMemoryBus(Config{BufferSize: 1, SlowConsumerPolicy: SlowConsumerPolicyBlock}).(*memoryBus)
+	sub, err := b.Subscribe(context.Background(), "session-block")
+	require.NoError(t, err)
+
+	require.NoError(t, b.Publish(context.Background(), "session-block", newEvent("session-block", "batch-block", "run-1")))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err = b.Publish(ctx, "session-block", newEvent("session-block", "batch-block", "run-2"))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	require.Equal(t, "run-1", readEvent(t, sub.Events).RunID)
+	requireNoEvent(t, sub.Events)
+}
+
+func TestPublishDropLatestDropsEvent(t *testing.T) {
+	obs, logs := observer.New(zap.WarnLevel)
+	b := NewMemoryBus(Config{
+		BufferSize:         1,
+		SlowConsumerPolicy: SlowConsumerPolicyDropLatest,
+		Logger:             zap.New(obs),
+	}).(*memoryBus)
+
+	sub, err := b.Subscribe(context.Background(), "session-drop-latest")
+	require.NoError(t, err)
+
+	require.NoError(t, b.Publish(context.Background(), "session-drop-latest", newEvent("session-drop-latest", "batch-drop", "run-1")))
+	err = b.Publish(context.Background(), "session-drop-latest", newEvent("session-drop-latest", "batch-drop", "run-2"))
+	require.ErrorIs(t, err, ErrSlowConsumer)
+
+	require.Equal(t, "run-1", readEvent(t, sub.Events).RunID)
+	requireNoEvent(t, sub.Events)
+	require.Equal(t, 1, logs.Len())
+	require.Equal(t, zapcore.WarnLevel, logs.All()[0].Level)
+	require.Equal(t, "slow consumer drop", logs.All()[0].Message)
+}
+
+func TestPublishDropOldestReplacesOldest(t *testing.T) {
+	obs, logs := observer.New(zap.WarnLevel)
+	b := NewMemoryBus(Config{
+		BufferSize:         1,
+		SlowConsumerPolicy: SlowConsumerPolicyDropOldest,
+		Logger:             zap.New(obs),
+	}).(*memoryBus)
+
+	sub, err := b.Subscribe(context.Background(), "session-drop-oldest")
+	require.NoError(t, err)
+
+	require.NoError(t, b.Publish(context.Background(), "session-drop-oldest", newEvent("session-drop-oldest", "batch-drop", "run-1")))
+	err = b.Publish(context.Background(), "session-drop-oldest", newEvent("session-drop-oldest", "batch-drop", "run-2"))
+	require.ErrorIs(t, err, ErrSlowConsumer)
+
+	require.Equal(t, "run-2", readEvent(t, sub.Events).RunID)
+	requireNoEvent(t, sub.Events)
+	require.Equal(t, 1, logs.Len())
+	require.Equal(t, "slow consumer drop", logs.All()[0].Message)
+}
+
 func waitForClosed(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 
@@ -97,5 +200,39 @@ func waitForClosed(t *testing.T, ch <-chan struct{}) {
 	case <-ch:
 	case <-time.After(time.Second):
 		t.Fatalf("timeout waiting for channel to close")
+	}
+}
+
+func newEvent(sessionID, batchID, runID string) storage.SessionEvent {
+	return storage.SessionEvent{
+		BatchID:    batchID,
+		RunID:      runID,
+		SessionID:  sessionID,
+		IngestedAt: time.Now(),
+	}
+}
+
+func readEvent(t *testing.T, ch <-chan storage.SessionEvent) storage.SessionEvent {
+	t.Helper()
+
+	select {
+	case evt, ok := <-ch:
+		if !ok {
+			t.Fatalf("channel closed unexpectedly")
+		}
+		return evt
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for event")
+		return storage.SessionEvent{}
+	}
+}
+
+func requireNoEvent(t *testing.T, ch <-chan storage.SessionEvent) {
+	t.Helper()
+
+	select {
+	case evt := <-ch:
+		t.Fatalf("expected no event, got %+v", evt)
+	default:
 	}
 }

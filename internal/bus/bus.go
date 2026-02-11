@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 
 	"github.com/barzoj/yaralpho/internal/storage"
 	"go.uber.org/zap"
@@ -16,6 +17,15 @@ const (
 	SlowConsumerPolicyBlock      SlowConsumerPolicy = "block"
 	SlowConsumerPolicyDropLatest SlowConsumerPolicy = "drop_latest"
 	SlowConsumerPolicyDropOldest SlowConsumerPolicy = "drop_oldest"
+)
+
+var (
+	// ErrSlowConsumer signals that a subscriber buffer was full and the slow-consumer
+	// policy was applied.
+	ErrSlowConsumer = errors.New("bus: slow consumer buffer full")
+	// ErrSubscriptionClosed indicates an attempt to publish to a subscription that
+	// has already been cleaned up.
+	ErrSubscriptionClosed = errors.New("bus: subscription closed")
 )
 
 // Config controls memory bus behavior and instrumentation.
@@ -55,6 +65,9 @@ func (s Subscription) Close() error {
 func normalizeConfig(cfg Config) Config {
 	if cfg.BufferSize <= 0 {
 		cfg.BufferSize = defaultBufferSize
+	}
+	if cfg.SlowConsumerPolicy == "" {
+		cfg.SlowConsumerPolicy = SlowConsumerPolicyBlock
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = zap.NewNop()
