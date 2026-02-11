@@ -45,7 +45,7 @@ func (f *fakeStorage) UpdateTaskRun(ctx context.Context, run *storage.TaskRun) e
 func (f *fakeStorage) GetTaskRun(ctx context.Context, runID string) (*storage.TaskRun, error) {
 	return nil, nil
 }
-func (f *fakeStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRun, error) {
+func (f *fakeStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRunSummary, error) {
 	return nil, nil
 }
 func (f *fakeStorage) InsertSessionEvent(ctx context.Context, event *storage.SessionEvent) error {

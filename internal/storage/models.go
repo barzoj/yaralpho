@@ -47,6 +47,12 @@ type TaskRun struct {
 	Result     *RunResult    `json:"result,omitempty" bson:"result,omitempty"`
 }
 
+// TaskRunSummary represents a task run with aggregated metadata for listing.
+type TaskRunSummary struct {
+	TaskRun     `bson:",inline"`
+	TotalEvents int64 `json:"total_events" bson:"total_events"`
+}
+
 // RunResult captures optional outputs from a completed task run.
 type RunResult struct {
 	CommitHash   string `json:"commit_hash,omitempty" bson:"commit_hash,omitempty"`

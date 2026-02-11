@@ -714,11 +714,17 @@ func (f *fakeStorage) GetTaskRun(ctx context.Context, runID string) (*storage.Ta
 	return &r, nil
 }
 
-func (f *fakeStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRun, error) {
-	out := []storage.TaskRun{}
+func (f *fakeStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRunSummary, error) {
+	out := []storage.TaskRunSummary{}
 	for _, r := range f.runs {
 		if r.BatchID == batchID {
-			out = append(out, r)
+			var total int64
+			for _, evt := range f.sessionEvents {
+				if evt.RunID == r.ID {
+					total++
+				}
+			}
+			out = append(out, storage.TaskRunSummary{TaskRun: r, TotalEvents: total})
 		}
 	}
 	return out, nil

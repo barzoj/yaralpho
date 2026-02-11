@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 	"time"
 
@@ -78,13 +79,24 @@ func (s *handlerTestStorage) GetTaskRun(ctx context.Context, runID string) (*sto
 	}
 	return &r, nil
 }
-func (s *handlerTestStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRun, error) {
-	out := []storage.TaskRun{}
+func (s *handlerTestStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRunSummary, error) {
+	out := []storage.TaskRunSummary{}
 	for _, r := range s.runs {
 		if batchID == "" || r.BatchID == batchID {
-			out = append(out, r)
+			var total int64
+			for _, events := range s.events {
+				for _, evt := range events {
+					if evt.RunID == r.ID {
+						total++
+					}
+				}
+			}
+			out = append(out, storage.TaskRunSummary{TaskRun: r, TotalEvents: total})
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt.After(out[j].StartedAt)
+	})
 	return out, nil
 }
 func (s *handlerTestStorage) InsertSessionEvent(ctx context.Context, event *storage.SessionEvent) error {
@@ -278,6 +290,63 @@ func TestHandlers_RunEvents_NotFound(t *testing.T) {
 	app.Router().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestHandlers_ListRunsIncludesTaskRefAndEventCounts(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+
+	now := time.Now().UTC()
+	run1 := storage.TaskRun{
+		ID:        "run-newer",
+		BatchID:   "batch-1",
+		TaskRef:   "task-1",
+		Status:    storage.TaskRunStatusSucceeded,
+		SessionID: "s1",
+		StartedAt: now,
+	}
+	run2 := storage.TaskRun{
+		ID:        "run-older",
+		BatchID:   "batch-1",
+		TaskRef:   "task-2",
+		Status:    storage.TaskRunStatusFailed,
+		SessionID: "s2",
+		StartedAt: now.Add(-time.Minute),
+	}
+	st.runs[run1.ID] = run1
+	st.runs[run2.ID] = run2
+	st.events["s1"] = []storage.SessionEvent{
+		{RunID: "run-newer", SessionID: "s1", Event: map[string]any{"n": 1}},
+		{RunID: "run-newer", SessionID: "s1", Event: map[string]any{"n": 2}},
+	}
+	st.events["s2"] = []storage.SessionEvent{
+		{RunID: "run-older", SessionID: "s2", Event: map[string]any{"n": 1}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/runs?batch_id=batch-1&limit=2", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Runs  []map[string]any `json:"runs"`
+		Count float64          `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, float64(2), resp.Count)
+	require.Len(t, resp.Runs, 2)
+
+	first := resp.Runs[0]
+	second := resp.Runs[1]
+
+	require.Equal(t, "run-newer", first["run_id"])
+	require.Equal(t, "task-1", first["task_ref"])
+	require.Equal(t, float64(2), first["total_events"])
+
+	require.Equal(t, "run-older", second["run_id"])
+	require.Equal(t, "task-2", second["task_ref"])
+	require.Equal(t, float64(1), second["total_events"])
 }
 
 func TestHandlers_BatchProgress(t *testing.T) {

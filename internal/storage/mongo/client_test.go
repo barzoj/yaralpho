@@ -103,6 +103,9 @@ func TestMongoStorageCRUD(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
+	if runs[0].TotalEvents != 0 {
+		t.Fatalf("expected 0 events, got %d", runs[0].TotalEvents)
+	}
 
 	event := &storage.SessionEvent{
 		BatchID:    batch.ID,
@@ -121,6 +124,14 @@ func TestMongoStorageCRUD(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Event["raw"] != true {
 		t.Fatalf("unexpected session events: %+v", events)
+	}
+
+	runsWithCounts, err := client.ListTaskRuns(ctx, batch.ID)
+	if err != nil {
+		t.Fatalf("ListTaskRuns after events: %v", err)
+	}
+	if runsWithCounts[0].TotalEvents != 1 {
+		t.Fatalf("expected 1 event, got %d", runsWithCounts[0].TotalEvents)
 	}
 
 	progress, err := client.GetBatchProgress(ctx, batch.ID)

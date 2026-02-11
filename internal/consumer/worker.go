@@ -179,7 +179,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 	}
 }
 
-func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item QueueItem, runs []storage.TaskRun) error {
+func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item QueueItem, runs []storage.TaskRunSummary) error {
 	retries, hasRetries := w.parseMaxRetries()
 
 	for {
@@ -211,7 +211,7 @@ func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item Queu
 			}
 
 			if !runRecorded {
-				runs = append(runs, storage.TaskRun{TaskRef: child})
+				runs = append(runs, storage.TaskRunSummary{TaskRun: storage.TaskRun{TaskRef: child}})
 				runRecorded = true
 			}
 
@@ -326,7 +326,7 @@ func isSessionIdleEvent(evt copilot.RawEvent) bool {
 	return strings.EqualFold(eventType, "session.idle")
 }
 
-func firstAvailableChild(children []string, runs []storage.TaskRun) (string, bool) {
+func firstAvailableChild(children []string, runs []storage.TaskRunSummary) (string, bool) {
 	seen := make(map[string]struct{}, len(runs))
 	for _, r := range runs {
 		seen[strings.TrimSpace(r.TaskRef)] = struct{}{}

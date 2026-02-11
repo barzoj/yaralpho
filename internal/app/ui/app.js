@@ -750,6 +750,29 @@
     }
   }
 
+  function buildRunsTable(batchId, runs) {
+    const rows = (runs || []).map((run) => [
+      createLink(
+        `/app?batch=${encodeURIComponent(batchId)}&run=${encodeURIComponent(
+          run.run_id
+        )}`,
+        run.run_id
+      ),
+      run.task_ref || "—",
+      run.status || "unknown",
+      Number.isFinite(Number(run.total_events))
+        ? Number(run.total_events)
+        : run.total_events ?? "—",
+      formatDate(run.started_at),
+      formatDate(run.finished_at),
+    ]);
+
+    return buildTable(
+      ["Run", "Task Ref", "Status", "Total Events", "Started", "Finished"],
+      rows
+    );
+  }
+
   async function renderRuns(batchId) {
     viewTitle.textContent = `Runs for ${batchId}`;
     renderBreadcrumbs([
@@ -775,21 +798,7 @@
         return;
       }
 
-      const rows = runs.map((run) => [
-        createLink(
-          `/app?batch=${encodeURIComponent(batchId)}&run=${encodeURIComponent(
-            run.run_id
-          )}`,
-          run.run_id
-        ),
-        run.status || "unknown",
-        formatDate(run.started_at),
-        formatDate(run.finished_at),
-      ]);
-
-      contentEl.appendChild(
-        buildTable(["Run", "Status", "Started", "Finished"], rows)
-      );
+      contentEl.appendChild(buildRunsTable(batchId, runs));
       setStatus(`Showing ${data.count ?? runs.length} runs`, "success");
     } catch (err) {
       contentEl.appendChild(emptyState("Unable to load runs."));
@@ -1387,6 +1396,7 @@
   }
   if (typeof module !== "undefined" && module.exports) {
     module.exports.RunLayout = layoutApi;
+    module.exports.RunList = { buildRunsTable, renderRuns };
   }
 
   function start() {

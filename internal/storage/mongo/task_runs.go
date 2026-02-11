@@ -62,7 +62,7 @@ func (c *Client) GetTaskRun(ctx context.Context, runID string) (*storage.TaskRun
 	return &run, nil
 }
 
-func (c *Client) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRun, error) {
+func (c *Client) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRunSummary, error) {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
 
@@ -89,5 +89,73 @@ func (c *Client) ListTaskRuns(ctx context.Context, batchID string) ([]storage.Ta
 	if err := cur.Err(); err != nil {
 		return nil, fmt.Errorf("iterate task runs: %w", err)
 	}
-	return runs, nil
+
+	if len(runs) == 0 {
+		return []storage.TaskRunSummary{}, nil
+	}
+
+	runIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		runIDs = append(runIDs, run.ID)
+	}
+
+	counts, err := c.fetchEventCounts(ctx, runIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]storage.TaskRunSummary, 0, len(runs))
+	for _, run := range runs {
+		summaries = append(summaries, storage.TaskRunSummary{
+			TaskRun:     run,
+			TotalEvents: counts[run.ID],
+		})
+	}
+
+	return summaries, nil
+}
+
+func (c *Client) fetchEventCounts(ctx context.Context, runIDs []string) (map[string]int64, error) {
+	if len(runIDs) == 0 {
+		return map[string]int64{}, nil
+	}
+
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"run_id": bson.M{"$in": runIDs}}}},
+		{{Key: "$group", Value: bson.M{"_id": "$run_id", "total": bson.M{"$sum": 1}}}},
+	}
+
+	cur, err := c.sessionEvents.Aggregate(ctx, pipeline)
+	if err != nil {
+		c.logger.Error("aggregate session events for run counts", zap.Error(err))
+		return nil, fmt.Errorf("aggregate session events: %w", err)
+	}
+	defer cur.Close(context.Background())
+
+	counts := make(map[string]int64, len(runIDs))
+	for cur.Next(ctx) {
+		var doc struct {
+			ID    string `bson:"_id"`
+			Total int64  `bson:"total"`
+		}
+		if err := cur.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode session events aggregate: %w", err)
+		}
+		counts[doc.ID] = doc.Total
+	}
+	if err := cur.Err(); err != nil {
+		return nil, fmt.Errorf("iterate session events aggregate: %w", err)
+	}
+
+	// ensure zero default for runs with no events
+	for _, id := range runIDs {
+		if _, ok := counts[id]; !ok {
+			counts[id] = 0
+		}
+	}
+
+	return counts, nil
 }
