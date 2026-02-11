@@ -113,7 +113,7 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				zap.String("session_id", run.SessionID),
 			)
 		}
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "subscribe failed"), time.Now().Add(wsWriteTimeout))
+		writeClose(conn, websocket.CloseInternalServerErr, "subscribe failed", a.logger, run)
 		return
 	}
 	defer sub.Close()
@@ -129,7 +129,7 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				zap.String("session_id", run.SessionID),
 			)
 		}
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "list session events failed"), time.Now().Add(wsWriteTimeout))
+		writeClose(conn, websocket.CloseInternalServerErr, "list session events failed", a.logger, run)
 		return
 	}
 
@@ -154,6 +154,7 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 			cancel()
+			writeClose(conn, websocket.CloseGoingAway, "write failed during backfill", a.logger, run)
 			return
 		}
 		seen[eventKey(evt)] = struct{}{}
@@ -173,11 +174,11 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(wsWriteTimeout))
+			writeClose(conn, websocket.CloseNormalClosure, "context done", a.logger, run)
 			return
 		case evt, ok := <-sub.Events:
 			if !ok {
-				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(wsWriteTimeout))
+				writeClose(conn, websocket.CloseNormalClosure, "subscription closed", a.logger, run)
 				return
 			}
 
@@ -200,6 +201,7 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 					)
 				}
 				cancel()
+				writeClose(conn, websocket.CloseGoingAway, "write failed", a.logger, run)
 				return
 			}
 			seen[key] = struct{}{}
@@ -235,4 +237,27 @@ func writeEventEnvelope(conn *websocket.Conn, evt storage.SessionEvent) error {
 
 func eventKey(evt storage.SessionEvent) string {
 	return fmt.Sprintf("%s|%s|%s|%s", evt.SessionID, evt.RunID, evt.BatchID, evt.IngestedAt.UTC().Format(time.RFC3339Nano))
+}
+
+func writeClose(conn *websocket.Conn, code int, reason string, logger *zap.Logger, run *storage.TaskRun) {
+	if conn == nil {
+		return
+	}
+
+	if reason != "" && len(reason) > 123 {
+		reason = reason[:123]
+	}
+
+	_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(wsWriteTimeout))
+
+	if logger != nil && run != nil {
+		logger.Info(
+			"websocket closing",
+			zap.Int("code", code),
+			zap.String("reason", reason),
+			zap.String("run_id", run.ID),
+			zap.String("batch_id", run.BatchID),
+			zap.String("session_id", run.SessionID),
+		)
+	}
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/bus"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
@@ -182,6 +184,44 @@ func TestRunEventsLiveHandlerBackfillsFromCursor(t *testing.T) {
 	conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	_, _, err = conn.ReadMessage()
 	require.Error(t, err)
+}
+
+func TestRunEventsLiveHandlerClosesOnSubscribeError(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+
+	app.eventBus = errBus{}
+	st.runs["run-1"] = storage.TaskRun{
+		ID:        "run-1",
+		BatchID:   "batch-1",
+		SessionID: "session-1",
+	}
+
+	server := httptest.NewServer(app.Router())
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/runs/run-1/events/live"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		require.Failf(t, "handshake failed", "status=%v body=%s err=%v", statusFromResponse(resp), bodyFromResponse(resp), err)
+	}
+	defer conn.Close()
+
+	_, _, readErr := conn.ReadMessage()
+	var closeErr *websocket.CloseError
+	require.ErrorAs(t, readErr, &closeErr)
+	require.Equal(t, websocket.CloseInternalServerErr, closeErr.Code)
+	require.Contains(t, closeErr.Text, "subscribe failed")
+}
+
+type errBus struct{}
+
+func (errBus) Publish(ctx context.Context, sessionID string, evt storage.SessionEvent) error {
+	return nil
+}
+func (errBus) Subscribe(ctx context.Context, sessionID string) (bus.Subscription, error) {
+	return bus.Subscription{}, errors.New("subscribe failed")
 }
 
 func statusFromResponse(resp *http.Response) any {
