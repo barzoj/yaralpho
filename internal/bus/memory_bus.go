@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/barzoj/yaralpho/internal/storage"
 	"go.uber.org/zap"
@@ -55,18 +56,29 @@ func (b *memoryBus) Subscribe(ctx context.Context, sessionID string) (Subscripti
 		ctx = context.Background()
 	}
 
-	sub := newSubscriber(b.cfg.BufferSize)
-
 	b.mu.Lock()
 	bucket, ok := b.subs[sessionID]
 	if !ok {
+		if b.cfg.MaxSessions > 0 && len(b.subs) >= b.cfg.MaxSessions {
+			b.mu.Unlock()
+			return Subscription{}, b.handleCapExceeded(sessionID, "sessions", ErrSessionLimitExceeded)
+		}
 		bucket = make(map[*subscriber]struct{})
 		b.subs[sessionID] = bucket
 	}
+	if b.cfg.MaxSubscribersPerSession > 0 && len(bucket) >= b.cfg.MaxSubscribersPerSession {
+		b.mu.Unlock()
+		return Subscription{}, b.handleCapExceeded(sessionID, "subscribers", ErrSubscriberLimitExceeded)
+	}
+
+	sub := newSubscriber(b.cfg.BufferSize, b.cfg.IdleTimeout)
 	bucket[sub] = struct{}{}
 	b.mu.Unlock()
 
 	sub.setCleanup(b.cleanupFunc(sessionID, sub))
+	sub.startIdleTimer(func() {
+		_ = sub.Close()
+	})
 	go sub.watchContext(ctx)
 
 	return Subscription{
@@ -74,6 +86,20 @@ func (b *memoryBus) Subscribe(ctx context.Context, sessionID string) (Subscripti
 		done:    sub.done,
 		closeFn: sub.Close,
 	}, nil
+}
+
+func (b *memoryBus) handleCapExceeded(sessionID, limit string, capErr error) error {
+	b.cfg.Logger.Warn(
+		"bus capacity exceeded",
+		zap.String("policy", string(b.cfg.CapExceedPolicy)),
+		zap.String("session_id", sessionID),
+		zap.String("limit", limit),
+		zap.Error(capErr),
+	)
+
+	// Both policies currently signal failure to the caller while leaving
+	// existing subscribers untouched.
+	return capErr
 }
 
 func (b *memoryBus) cleanupFunc(sessionID string, sub *subscriber) func() error {
@@ -132,6 +158,7 @@ func (b *memoryBus) publishToSubscriber(ctx context.Context, sessionID string, s
 func (b *memoryBus) handleBlocking(ctx context.Context, sub *subscriber, evt storage.SessionEvent) error {
 	select {
 	case sub.events <- evt:
+		sub.touch()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -141,6 +168,7 @@ func (b *memoryBus) handleBlocking(ctx context.Context, sub *subscriber, evt sto
 func (b *memoryBus) handleDropLatest(sessionID string, sub *subscriber, evt storage.SessionEvent) error {
 	select {
 	case sub.events <- evt:
+		sub.touch()
 		return nil
 	default:
 		b.logDrop(sessionID, evt, "drop_latest")
@@ -164,6 +192,7 @@ func (b *memoryBus) handleDropOldest(ctx context.Context, sessionID string, sub 
 
 	select {
 	case sub.events <- evt:
+		sub.touch()
 		return ErrSlowConsumer
 	case <-ctx.Done():
 		return ctx.Err()
@@ -185,15 +214,23 @@ type subscriber struct {
 	events chan storage.SessionEvent
 	done   chan struct{}
 
+	idleTimeout time.Duration
+	idleReset   chan struct{}
+
 	closeOnce sync.Once
 	cleanup   func() error
 }
 
-func newSubscriber(buffer int) *subscriber {
-	return &subscriber{
+func newSubscriber(buffer int, idleTimeout time.Duration) *subscriber {
+	s := &subscriber{
 		events: make(chan storage.SessionEvent, buffer),
 		done:   make(chan struct{}),
 	}
+	if idleTimeout > 0 {
+		s.idleTimeout = idleTimeout
+		s.idleReset = make(chan struct{}, 1)
+	}
+	return s
 }
 
 func (s *subscriber) setCleanup(fn func() error) {
@@ -209,6 +246,44 @@ func (s *subscriber) Close() error {
 		close(s.done)
 	})
 	return err
+}
+
+func (s *subscriber) startIdleTimer(onIdle func()) {
+	if s.idleTimeout <= 0 {
+		return
+	}
+
+	timer := time.NewTimer(s.idleTimeout)
+	go func() {
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				onIdle()
+				return
+			case <-s.done:
+				return
+			case <-s.idleReset:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(s.idleTimeout)
+			}
+		}
+	}()
+}
+
+func (s *subscriber) touch() {
+	if s.idleTimeout <= 0 {
+		return
+	}
+	select {
+	case s.idleReset <- struct{}{}:
+	default:
+	}
 }
 
 func (s *subscriber) watchContext(ctx context.Context) {
