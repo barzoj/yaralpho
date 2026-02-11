@@ -6,11 +6,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/bus"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"go.uber.org/zap"
 )
+
+var sessionEventBus bus.Bus
+
+func setSessionEventBus(b bus.Bus) {
+	sessionEventBus = b
+}
 
 func executeTask(
 	ctx context.Context,
@@ -82,18 +89,26 @@ eventLoop:
 				break eventLoop
 			}
 
-			err := st.InsertSessionEvent(ctx, &storage.SessionEvent{
+			sessionEvent := &storage.SessionEvent{
 				BatchID:    batch.ID,
 				RunID:      run.ID,
 				SessionID:  sessionID,
 				Event:      evt,
 				IngestedAt: now(),
-			})
-			if err != nil {
+			}
+
+			if err := st.InsertSessionEvent(ctx, sessionEvent); err != nil {
 				status = storage.TaskRunStatusFailed
 				finalErr = err
 				logger.Error("insert session event", zap.Error(err), zap.String("run_id", run.ID))
 				break eventLoop
+			}
+
+			if sessionEventBus != nil {
+				if err := sessionEventBus.Publish(ctx, sessionID, *sessionEvent); err != nil {
+					logger.Warn("publish session event", zap.Error(err), zap.String("run_id", run.ID), zap.String("session_id", sessionID), zap.String("batch_id", batch.ID))
+					_ = nt.NotifyError(ctx, batch.ID, run.ID, runRef, fmt.Errorf("publish session event: %w", err))
+				}
 			}
 
 			if isSessionIdleEvent(evt) {

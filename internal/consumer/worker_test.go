@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/bus"
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
@@ -393,6 +394,90 @@ func TestExecuteTaskWithStructuredOutput_ReturnsLatestAssistantMessage(t *testin
 	require.Len(t, st.sessionEvents, 3)
 }
 
+func TestExecuteTask_PublishesSessionEventsToBus(t *testing.T) {
+	ctx := context.Background()
+	setSessionEventBus(nil)
+	defer setSessionEventBus(nil)
+
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	events := make(chan copilot.RawEvent, 1)
+	events <- copilot.RawEvent{"type": "assistant.message", "data": map[string]any{"content": "hi"}}
+	close(events)
+
+	cp := &fakeCopilot{events: events, sessionID: "s-bus"}
+	nt := &fakeNotifier{}
+	fb := &fakeBus{}
+	setSessionEventBus(fb)
+
+	now := time.Date(2026, 2, 8, 20, 0, 0, 0, time.UTC)
+	status, err := executeTask(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-bus" },
+		func() time.Time { return now },
+		&batch,
+		"task-bus",
+		"",
+		"prompt",
+	)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+
+	require.Len(t, fb.published, 1)
+	require.Equal(t, []string{"s-bus"}, fb.sessionIDs)
+	require.Equal(t, "b1", fb.published[0].BatchID)
+	require.Equal(t, "run-bus", fb.published[0].RunID)
+	require.Equal(t, "s-bus", fb.published[0].SessionID)
+	require.Empty(t, nt.errors)
+}
+
+func TestExecuteTask_PublishErrorNotifies(t *testing.T) {
+	ctx := context.Background()
+	setSessionEventBus(nil)
+	defer setSessionEventBus(nil)
+
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = batch
+
+	events := make(chan copilot.RawEvent, 1)
+	events <- copilot.RawEvent{"type": "assistant.message"}
+	close(events)
+
+	cp := &fakeCopilot{events: events, sessionID: "s-bus-err"}
+	nt := &fakeNotifier{}
+	fb := &fakeBus{publishErr: errors.New("publish boom")}
+	setSessionEventBus(fb)
+
+	now := time.Date(2026, 2, 8, 21, 0, 0, 0, time.UTC)
+	status, err := executeTask(
+		ctx,
+		cp,
+		st,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-bus-err" },
+		func() time.Time { return now },
+		&batch,
+		"task-bus-err",
+		"",
+		"prompt",
+	)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskRunStatusSucceeded, status)
+	require.Len(t, fb.published, 1)
+	require.Len(t, nt.errors, 1)
+	require.ErrorContains(t, nt.errors[0].err, "publish boom")
+}
+
 func TestExecuteTaskWithAssistantMessages_ReturnsAllAssistantMessages(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
@@ -663,6 +748,22 @@ type fakeNotifier struct {
 	finished  []notifyFinished
 	batchIdle []string
 	errors    []notifyError
+}
+
+type fakeBus struct {
+	published  []storage.SessionEvent
+	sessionIDs []string
+	publishErr error
+}
+
+func (f *fakeBus) Publish(ctx context.Context, sessionID string, evt storage.SessionEvent) error {
+	f.sessionIDs = append(f.sessionIDs, sessionID)
+	f.published = append(f.published, evt)
+	return f.publishErr
+}
+
+func (f *fakeBus) Subscribe(ctx context.Context, sessionID string) (bus.Subscription, error) {
+	return bus.Subscription{}, nil
 }
 
 type notifyFinished struct {

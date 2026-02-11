@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/bus"
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
@@ -47,6 +48,7 @@ type Worker struct {
 	logger   *zap.Logger
 	now      func() time.Time
 	newRunID func() string
+	bus      bus.Bus
 }
 
 // NewWorker constructs a Worker with sensible defaults for logger, notifier,
@@ -58,6 +60,9 @@ func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.
 	if nt == nil {
 		nt = notify.Noop{}
 	}
+	if sessionEventBus == nil {
+		setSessionEventBus(bus.NewMemoryBus(bus.Config{Logger: logger}))
+	}
 
 	return &Worker{
 		cfg:      cfg,
@@ -66,6 +71,7 @@ func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.
 		copilot:  cp,
 		storage:  st,
 		notifier: nt,
+		bus:      sessionEventBus,
 		repoPath: strings.TrimSpace(repoPath),
 		logger:   logger,
 		now: func() time.Time {

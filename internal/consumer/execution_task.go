@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/bus"
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
@@ -28,6 +29,7 @@ type ExecutionTask struct {
 	instruction string
 	newRunID    func() string
 	now         func() time.Time
+	bus         bus.Bus
 	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
@@ -56,6 +58,7 @@ func NewExecutionTask(cfg config.Config, tr tracker.Tracker, cp copilot.Client, 
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		bus:  sessionEventBus,
 		exec: executeTaskFunc,
 	}
 }
@@ -109,6 +112,10 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 	}
 	if t.now == nil {
 		t.now = func() time.Time { return time.Now().UTC() }
+	}
+
+	if t.bus == nil {
+		t.bus = sessionEventBus
 	}
 
 	status, messages, err := t.exec(ctx, t.copilot, t.storage, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
