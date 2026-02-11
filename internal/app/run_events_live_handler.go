@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -14,6 +16,17 @@ import (
 const (
 	wsReadTimeout  = 60 * time.Second
 	wsWriteTimeout = 10 * time.Second
+)
+
+type eventEnvelope struct {
+	Type   string                `json:"type"`
+	Cursor string                `json:"cursor,omitempty"`
+	Event  *storage.SessionEvent `json:"event,omitempty"`
+	Error  string                `json:"error,omitempty"`
+}
+
+const (
+	envelopeTypeEvent = "event"
 )
 
 // runEventsLiveHandler upgrades to websocket and streams session events for a run.
@@ -41,12 +54,10 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawCursor := r.URL.Query().Get("last_ingested")
-	if rawCursor != "" {
-		if _, err := time.Parse(time.RFC3339Nano, rawCursor); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid last_ingested")
-			return
-		}
+	cursor, err := parseCursor(r.URL.Query().Get("last_ingested"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	upgrader := websocket.Upgrader{
@@ -107,6 +118,48 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer sub.Close()
 
+	events, err := a.storage.ListSessionEvents(ctx, run.SessionID)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn(
+				"list session events failed",
+				zap.Error(err),
+				zap.String("run_id", run.ID),
+				zap.String("batch_id", run.BatchID),
+				zap.String("session_id", run.SessionID),
+			)
+		}
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "list session events failed"), time.Now().Add(wsWriteTimeout))
+		return
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].IngestedAt.Before(events[j].IngestedAt)
+	})
+
+	seen := make(map[string]struct{}, len(events))
+	for _, evt := range events {
+		if !evt.IngestedAt.After(cursor) {
+			continue
+		}
+
+		if err := writeEventEnvelope(conn, evt); err != nil {
+			if a.logger != nil {
+				a.logger.Info(
+					"websocket write failed during backfill",
+					zap.Error(err),
+					zap.String("run_id", run.ID),
+					zap.String("batch_id", run.BatchID),
+					zap.String("session_id", run.SessionID),
+				)
+			}
+			cancel()
+			return
+		}
+		seen[eventKey(evt)] = struct{}{}
+		cursor = evt.IngestedAt
+	}
+
 	// Drain control frames to detect client disconnects.
 	go func() {
 		for {
@@ -128,22 +181,15 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			payload, err := json.Marshal(evt)
-			if err != nil {
-				if a.logger != nil {
-					a.logger.Warn(
-						"marshal session event failed",
-						zap.Error(err),
-						zap.String("run_id", run.ID),
-						zap.String("batch_id", run.BatchID),
-						zap.String("session_id", run.SessionID),
-					)
-				}
+			if !evt.IngestedAt.After(cursor) {
+				continue
+			}
+			key := eventKey(evt)
+			if _, ok := seen[key]; ok {
 				continue
 			}
 
-			_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			if err := writeEventEnvelope(conn, evt); err != nil {
 				if a.logger != nil {
 					a.logger.Info(
 						"websocket write failed",
@@ -156,6 +202,37 @@ func (a *App) runEventsLiveHandler(w http.ResponseWriter, r *http.Request) {
 				cancel()
 				return
 			}
+			seen[key] = struct{}{}
+			cursor = evt.IngestedAt
 		}
 	}
+}
+
+func parseCursor(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid last_ingested")
+	}
+	if parsed.After(time.Now().UTC()) {
+		return time.Time{}, fmt.Errorf("invalid last_ingested")
+	}
+	return parsed, nil
+}
+
+func writeEventEnvelope(conn *websocket.Conn, evt storage.SessionEvent) error {
+	payload := eventEnvelope{
+		Type:   envelopeTypeEvent,
+		Cursor: evt.IngestedAt.UTC().Format(time.RFC3339Nano),
+		Event:  &evt,
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+	return conn.WriteJSON(payload)
+}
+
+func eventKey(evt storage.SessionEvent) string {
+	return fmt.Sprintf("%s|%s|%s|%s", evt.SessionID, evt.RunID, evt.BatchID, evt.IngestedAt.UTC().Format(time.RFC3339Nano))
 }
