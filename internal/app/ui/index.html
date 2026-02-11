@@ -67,6 +67,25 @@
       padding: 16px;
       box-shadow: 0 5px 20px rgba(15, 23, 42, 0.05);
     }
+    .run-layout {
+      display: grid;
+      gap: 12px;
+    }
+    .run-header {
+      position: sticky;
+      top: var(--run-header-offset, 0px);
+      z-index: 2;
+      display: grid;
+      gap: 10px;
+    }
+    .run-events {
+      display: grid;
+      gap: 10px;
+    }
+    .events-scroll {
+      overflow-y: auto;
+      max-height: calc(100vh - 200px);
+    }
     .view-header {
       display: flex;
       align-items: center;

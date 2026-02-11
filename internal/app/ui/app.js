@@ -3,6 +3,7 @@
   const contentEl = document.getElementById("content");
   const viewTitle = document.getElementById("view-title");
   const breadcrumbsEl = document.getElementById("breadcrumbs");
+  const runLayoutHelpers = typeof RunLayout !== "undefined" ? RunLayout : {};
 
   const params = new URLSearchParams(window.location.search);
   const batchParam = params.get("batch");
@@ -160,6 +161,7 @@
   let liveStreamState = null;
   let liveUnloadCleanup = null;
   let liveReconnectController = null;
+  let runLayoutCleanup = null;
 
   function setStatus(text, type = "info", options = {}) {
     statusEl.className = `status ${type}`;
@@ -821,6 +823,42 @@
     return grid;
   }
 
+  function computeRunHeaderOffset() {
+    if (typeof document === "undefined") return 0;
+    const pageHeader = document.querySelector("body > header");
+    const statusBar = document.getElementById("status");
+    const headerRect = pageHeader?.getBoundingClientRect();
+    const statusRect = statusBar?.getBoundingClientRect();
+    const offsets = [];
+    if (headerRect) offsets.push(headerRect.height);
+    if (statusRect) offsets.push(statusRect.height);
+    const total = offsets.reduce((sum, h) => sum + h, 0);
+    return Math.max(0, total);
+  }
+
+  function applyRunLayoutSizing(container) {
+    if (!container || !container.style) return;
+    const offset = computeRunHeaderOffset();
+    if (typeof container.style.setProperty === "function") {
+      container.style.setProperty("--run-header-offset", `${offset}px`);
+    } else {
+      container.style["--run-header-offset"] = `${offset}px`;
+    }
+    const scroll = container.querySelector(".events-scroll");
+    if (!scroll || !scroll.style) return;
+    const viewportHeight = window.innerHeight || 0;
+    const minHeight = Math.max(240, Math.round(viewportHeight * 0.4));
+    scroll.style.minHeight = `${minHeight}px`;
+    scroll.style.overflowY = "auto";
+  }
+
+  function attachRunLayout(container) {
+    applyRunLayoutSizing(container);
+    const handler = () => applyRunLayoutSizing(container);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }
+
   function renderEventsList(events) {
     const wrapper = document.createElement("div");
     wrapper.className = "events";
@@ -892,6 +930,26 @@
     return wrapper;
   }
 
+  function createRunLayout() {
+    const layout = document.createElement("div");
+    layout.className = "run-layout";
+
+    const header = document.createElement("div");
+    header.className = "run-header card";
+
+    const eventsSection = document.createElement("div");
+    eventsSection.className = "run-events card";
+
+    const eventsScroll = document.createElement("div");
+    eventsScroll.className = "events-scroll";
+    eventsSection.appendChild(eventsScroll);
+
+    layout.appendChild(header);
+    layout.appendChild(eventsSection);
+
+    return { layout, header, eventsScroll, eventsSection };
+  }
+
   function formatEventsInfoText(visibleCount, totalCount, streamingHiddenCount, truncatedCount) {
     const baseLabel = `${visibleCount} of ${totalCount} events shown`;
     const hiddenMessages = [];
@@ -946,6 +1004,10 @@
     if (liveUnloadCleanup) {
       liveUnloadCleanup();
       liveUnloadCleanup = null;
+    }
+    if (runLayoutCleanup) {
+      runLayoutCleanup();
+      runLayoutCleanup = null;
     }
     liveStreamState = null;
   }
@@ -1143,9 +1205,10 @@
         )
       );
     }
-    contentEl.appendChild(actions);
 
-    contentEl.appendChild(renderRunMeta(run));
+    const layout = createRunLayout();
+    layout.header.appendChild(actions);
+    layout.header.appendChild(renderRunMeta(run));
 
     let eventsData;
     try {
@@ -1174,10 +1237,11 @@
       streamingHiddenCount,
       truncatedCount
     );
-    contentEl.appendChild(info);
+    layout.header.appendChild(info);
 
     const eventsContainer = renderEventsList(visibleEvents);
-    contentEl.appendChild(eventsContainer);
+    layout.eventsScroll.appendChild(eventsContainer);
+    contentEl.appendChild(layout.layout);
 
     liveStreamState = {
       runId,
@@ -1191,6 +1255,8 @@
       socket: null,
       retryCount: 0,
     };
+
+    runLayoutCleanup = attachRunLayout(layout.layout);
 
     ensureReconnectController(runId);
     console.info("[live events] prepared initial state", {
@@ -1209,12 +1275,26 @@
       const note = document.createElement("div");
       note.className = "status warning";
       note.textContent = `Only showing first ${limitUsed} events (server truncated).`;
-      contentEl.appendChild(note);
+      layout.eventsSection.insertBefore(note, layout.eventsScroll);
     }
 
     updateEventsUI(liveStreamState);
     connectLiveStream(runId, batchId);
     setStatus("Run loaded", "success");
+  }
+
+  const layoutApi = {
+    createRunLayout,
+    applyRunLayoutSizing,
+    computeRunHeaderOffset,
+    attachRunLayout,
+  };
+
+  if (typeof globalThis !== "undefined") {
+    globalThis.RunLayout = Object.assign(globalThis.RunLayout || {}, layoutApi);
+  }
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports.RunLayout = layoutApi;
   }
 
   function start() {
