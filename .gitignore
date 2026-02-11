@@ -51,3 +51,7 @@ run_ralph.sh
 
 # binary
 yaralpho.bin
+
+# intenal
+/plans
+sync_plan_to_beads.py
