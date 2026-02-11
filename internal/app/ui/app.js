@@ -11,6 +11,7 @@
 
   const LIST_LIMIT = 50;
   const EVENTS_LIMIT = 10000;
+  const SCROLL_FOLLOW_THRESHOLD_PX = 24;
 
   const EVENT_META = {
     abort: { emoji: "⛔", label: "Session aborted" },
@@ -836,6 +837,79 @@
     return Math.max(0, total);
   }
 
+  function isNearBottom(element, thresholdPx = SCROLL_FOLLOW_THRESHOLD_PX) {
+    if (!element) return true;
+    const threshold = Number.isFinite(thresholdPx) ? thresholdPx : SCROLL_FOLLOW_THRESHOLD_PX;
+    const scrollTop = Number(element.scrollTop) || 0;
+    const clientHeight = Number(element.clientHeight) || 0;
+    const scrollHeight = Number(element.scrollHeight) || 0;
+    const distance = scrollHeight - (scrollTop + clientHeight);
+    return distance <= threshold;
+  }
+
+  function createScrollFollower(element, options = {}) {
+    const thresholdPx = Number.isFinite(options.thresholdPx)
+      ? options.thresholdPx
+      : SCROLL_FOLLOW_THRESHOLD_PX;
+    const onModeChange = typeof options.onModeChange === "function" ? options.onModeChange : () => {};
+
+    let mode = "follow";
+
+    function setMode(next) {
+      if (!next || next === mode) return;
+      mode = next;
+      onModeChange(mode);
+    }
+
+    function computeMode() {
+      return isNearBottom(element, thresholdPx) ? "follow" : "paused";
+    }
+
+    function handleScroll() {
+      setMode(computeMode());
+    }
+
+    function handleContentMutated() {
+      if (!element) return;
+      if (mode === "follow") {
+        element.scrollTop = element.scrollHeight;
+      }
+    }
+
+    function cleanup() {
+      if (element?.removeEventListener) {
+        element.removeEventListener("scroll", handleScroll);
+      }
+    }
+
+    if (element?.addEventListener) {
+      element.addEventListener("scroll", handleScroll);
+    }
+    mode = computeMode();
+    onModeChange(mode);
+
+    return {
+      handleContentMutated,
+      getMode: () => mode,
+      isAtBottom: () => isNearBottom(element, thresholdPx),
+      cleanup,
+    };
+  }
+
+  function updateLiveFollowIndicator(indicatorEl, mode) {
+    if (!indicatorEl) return;
+    const normalized = mode === "paused" ? "paused" : "live";
+    if (indicatorEl.classList?.remove) {
+      indicatorEl.classList.remove("live", "paused");
+      indicatorEl.classList.add(normalized);
+    } else {
+      indicatorEl.className = `pill live-status ${normalized}`;
+    }
+    indicatorEl.textContent = normalized === "paused" ? "Paused" : "Live";
+    indicatorEl.setAttribute("data-follow-mode", normalized);
+    indicatorEl.title = normalized === "paused" ? "Scroll to bottom to resume live updates" : "Following new events";
+  }
+
   function applyRunLayoutSizing(container) {
     if (!container || !container.style) return;
     const offset = computeRunHeaderOffset();
@@ -987,6 +1061,9 @@
     state.eventsContainer.replaceWith(nextContainer);
     state.eventsContainer = nextContainer;
     state.totalCount = totalCount;
+    if (state.scrollFollower?.handleContentMutated) {
+      state.scrollFollower.handleContentMutated();
+    }
   }
 
   function resetLiveStream(reason) {
@@ -1004,6 +1081,9 @@
     if (liveUnloadCleanup) {
       liveUnloadCleanup();
       liveUnloadCleanup = null;
+    }
+    if (liveStreamState?.scrollFollower?.cleanup) {
+      liveStreamState.scrollFollower.cleanup();
     }
     if (runLayoutCleanup) {
       runLayoutCleanup();
@@ -1209,6 +1289,9 @@
     const layout = createRunLayout();
     layout.header.appendChild(actions);
     layout.header.appendChild(renderRunMeta(run));
+    const liveStatus = document.createElement("div");
+    liveStatus.className = "pill live-status";
+    layout.header.appendChild(liveStatus);
 
     let eventsData;
     try {
@@ -1243,6 +1326,11 @@
     layout.eventsScroll.appendChild(eventsContainer);
     contentEl.appendChild(layout.layout);
 
+    const scrollFollower = createScrollFollower(layout.eventsScroll, {
+      thresholdPx: SCROLL_FOLLOW_THRESHOLD_PX,
+      onModeChange: (mode) => updateLiveFollowIndicator(liveStatus, mode),
+    });
+
     liveStreamState = {
       runId,
       batchId,
@@ -1254,6 +1342,8 @@
       seenKeys: new Set(rawEvents.map(eventKeyFromEvent)),
       socket: null,
       retryCount: 0,
+      scrollFollower,
+      liveStatusEl: liveStatus,
     };
 
     runLayoutCleanup = attachRunLayout(layout.layout);
@@ -1288,6 +1378,8 @@
     applyRunLayoutSizing,
     computeRunHeaderOffset,
     attachRunLayout,
+    isNearBottom,
+    createScrollFollower,
   };
 
   if (typeof globalThis !== "undefined") {
