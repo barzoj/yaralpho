@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-//go:embed index.html app.js
+//go:embed index.html app.js live_merge.js live_reconnect.js
 var assets embed.FS
 
 var fileServer http.Handler

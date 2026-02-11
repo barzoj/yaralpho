@@ -152,13 +152,30 @@
   const ENVELOPE_TYPE_EVENT = "event";
   const ENVELOPE_TYPE_ERROR = "error";
   const ENVELOPE_TYPE_HEARTBEAT = "heartbeat";
+  const LIVE_RETRY_BASE_DELAY_MS = 1000;
+  const LIVE_RETRY_MAX_DELAY_MS = 15000;
+  const LIVE_RETRY_MAX_ATTEMPTS = 5;
+  const LIVE_RETRY_JITTER = 0.2;
 
   let liveStreamState = null;
   let liveUnloadCleanup = null;
+  let liveReconnectController = null;
 
-  function setStatus(text, type = "info") {
-    statusEl.textContent = text;
+  function setStatus(text, type = "info", options = {}) {
     statusEl.className = `status ${type}`;
+    statusEl.textContent = text;
+    const action = options.action;
+    if (action && action.label) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "button-link";
+      btn.textContent = action.label;
+      if (typeof action.onClick === "function") {
+        btn.addEventListener("click", action.onClick);
+      }
+      statusEl.appendChild(document.createTextNode(" "));
+      statusEl.appendChild(btn);
+    }
   }
 
   function clearContent() {
@@ -292,6 +309,7 @@
   }
 
   const mergeHelpers = window.LiveEventsMerge || {};
+  const reconnectHelpers = window.LiveReconnect || {};
 
   const getIngestedAt =
     mergeHelpers.getIngestedAt ||
@@ -921,6 +939,10 @@
         // noop
       }
     }
+    if (liveReconnectController) {
+      liveReconnectController.reset();
+      liveReconnectController = null;
+    }
     if (liveUnloadCleanup) {
       liveUnloadCleanup();
       liveUnloadCleanup = null;
@@ -939,6 +961,45 @@
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const search = cursor ? `?last_ingested=${encodeURIComponent(cursor)}` : "";
     return `${proto}://${window.location.host}/runs/${encodeURIComponent(runId)}/events/live${search}`;
+  }
+
+  function ensureReconnectController(runId) {
+    if (liveReconnectController) return liveReconnectController;
+    if (!reconnectHelpers.createReconnectController) return null;
+    liveReconnectController = reconnectHelpers.createReconnectController({
+      maxAttempts: LIVE_RETRY_MAX_ATTEMPTS,
+      baseDelayMs: LIVE_RETRY_BASE_DELAY_MS,
+      maxDelayMs: LIVE_RETRY_MAX_DELAY_MS,
+      jitterFactor: LIVE_RETRY_JITTER,
+      setStatus,
+      onRetry: () => {
+        if (!liveStreamState || liveStreamState.runId !== runId) return;
+        connectLiveStream(runId, liveStreamState.batchId, true);
+      },
+      onExhausted: (reason) => {
+        setStatus(
+          `Live updates unavailable${reason ? ` (${reason})` : ""}. Please refresh to continue.`,
+          "warning",
+          {
+            action: {
+              label: "Refresh",
+              onClick: () => window.location.reload(),
+            },
+          }
+        );
+      },
+    });
+    return liveReconnectController;
+  }
+
+  function scheduleLiveReconnect(reason) {
+    if (!liveStreamState) return;
+    const reconnect = ensureReconnectController(liveStreamState.runId);
+    if (!reconnect) return;
+    if (reconnect.hasTimer()) {
+      return { scheduled: true, attempts: reconnect.getAttempts(), delay: 0 };
+    }
+    return reconnect.scheduleReconnect(reason);
   }
 
   function handleLiveEnvelope(envelope) {
@@ -989,7 +1050,7 @@
     }
   }
 
-  function connectLiveStream(runId, batchId) {
+  function connectLiveStream(runId, batchId, isRetry = false) {
     if (!runId || !liveStreamState) return;
 
     const url = buildLiveURL(runId, liveStreamState.cursor);
@@ -1011,9 +1072,11 @@
     const socket = new WebSocket(url);
     liveStreamState.socket = socket;
     ensureUnloadCleanup();
+    const reconnect = ensureReconnectController(runId);
 
     socket.addEventListener("open", () => {
       console.info("[live events] connected", { runId, batchId });
+      if (reconnect) reconnect.handleConnected();
     });
 
     socket.addEventListener("message", (event) => {
@@ -1029,6 +1092,7 @@
     socket.addEventListener("error", (err) => {
       setStatus("Live stream error (see console)", "warning");
       console.error("[live events] socket error", err);
+      scheduleLiveReconnect("socket error");
     });
 
     socket.addEventListener("close", (evt) => {
@@ -1041,6 +1105,7 @@
         code: evt.code,
         reason: evt.reason,
       });
+      scheduleLiveReconnect(evt.reason || `code ${evt.code}`);
     });
   }
 
@@ -1124,8 +1189,10 @@
       cursor: deriveLatestIngested(rawEvents),
       seenKeys: new Set(rawEvents.map(eventKeyFromEvent)),
       socket: null,
+      retryCount: 0,
     };
 
+    ensureReconnectController(runId);
     console.info("[live events] prepared initial state", {
       runId,
       batchId,
