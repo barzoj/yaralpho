@@ -93,7 +93,11 @@ func Build(ctx context.Context, logger *zap.Logger, cfg config.Config) (*App, er
 		return nil, fmt.Errorf("init notifier: %w", err)
 	}
 
-	cp := copilot.NewGitHub(logger)
+	token, err := cfg.Get(config.CopilotTokenKey)
+	if err != nil {
+		return nil, fmt.Errorf("get copilot token: %w", err)
+	}
+	cp := copilot.NewGitHubWithToken(logger, token, config.CopilotTokenKey)
 	cons := consumer.NewWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
 
 	return New(logger, cfg, st, q, tr, nt, cp, cons)
@@ -198,6 +202,8 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	}()
 
+	a.logConfigValues()
+
 	select {
 	case <-runCtx.Done():
 	case err := <-errCh:
@@ -229,6 +235,20 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (a *App) logConfigValues() {
+	fields := make([]zap.Field, 0, len(config.LoggableKeys()))
+	for _, key := range config.LoggableKeys() {
+		value, err := a.cfg.Get(key)
+		if err != nil {
+			fields = append(fields, zap.String(key, "<missing>"))
+			continue
+		}
+		fields = append(fields, zap.String(key, value))
+	}
+
+	a.logger.Info("config values", fields...)
 }
 
 // Router exposes the underlying mux router for tests.

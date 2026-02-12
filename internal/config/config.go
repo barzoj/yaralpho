@@ -95,6 +95,22 @@ var requiredKeys = []string{
 	CopilotTokenKey,
 }
 
+// LoggableKeys lists configuration keys safe to emit in logs. Token values are
+// intentionally excluded to avoid leaking credentials.
+func LoggableKeys() []string {
+	return []string{
+		MongoURIKey,
+		MongoDBKey,
+		RepoPathKey,
+		BdRepoKey,
+		PortKey,
+		SlackWebhookKey,
+		MaxRetriesKey,
+		ExecutionTaskPromptKey,
+		VerificationTaskPromptKey,
+	}
+}
+
 // Load builds a Config using environment variables first, falling back to a
 // JSON file. Missing required keys cause a zap.Panic.
 func Load(logger *zap.Logger) (Config, error) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -23,6 +24,7 @@ var _ Client = (*GitHub)(nil)
 type GitHub struct {
 	logger    *zap.Logger
 	newClient func(opts *githubcopilot.ClientOptions) copilotClient
+	selectTok func() (string, string)
 }
 
 // NewGitHub constructs a GitHub Copilot client. Logger defaults to zap.NewNop.
@@ -36,7 +38,23 @@ func NewGitHub(logger *zap.Logger) *GitHub {
 		newClient: func(opts *githubcopilot.ClientOptions) copilotClient {
 			return &sdkClient{inner: githubcopilot.NewClient(opts)}
 		},
+		selectTok: selectToken,
 	}
+}
+
+// NewGitHubWithToken constructs a GitHub Copilot client that uses the provided
+// token instead of reading from the environment.
+func NewGitHubWithToken(logger *zap.Logger, token, tokenKey string) *GitHub {
+	client := NewGitHub(logger)
+	trimmed := strings.TrimSpace(token)
+	key := strings.TrimSpace(tokenKey)
+	if key == "" {
+		key = "config"
+	}
+	client.selectTok = func() (string, string) {
+		return trimmed, key
+	}
+	return client
 }
 
 // StartSession creates a Copilot session for the provided prompt and repository
@@ -44,7 +62,11 @@ func NewGitHub(logger *zap.Logger) *GitHub {
 // function that tears down the SDK resources.
 func (g *GitHub) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan RawEvent, func(), error) {
 	g.logger.Debug("starting copilot session", zap.String("repo_path", repoPath))
-	token, tokenKey := selectToken()
+	selectTokenFn := g.selectTok
+	if selectTokenFn == nil {
+		selectTokenFn = selectToken
+	}
+	token, tokenKey := selectTokenFn()
 	if token == "" {
 		err := fmt.Errorf("missing GitHub Copilot token (checked COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN)")
 		g.logger.Error("copilot token missing", zap.Error(err))
@@ -65,6 +87,7 @@ func (g *GitHub) StartSession(ctx context.Context, prompt, repoPath string) (str
 	session, err := client.CreateSession(ctx, &githubcopilot.SessionConfig{
 		OnPermissionRequest: approvePermission,
 		Model:               "gpt-5.1-codex-max",
+		SkillDirectories:    defaultSkillDirectories(repoPath),
 		WorkingDirectory:    repoPath,
 		Streaming:           true,
 	})
@@ -166,6 +189,14 @@ func resolveCLIPath(logger *zap.Logger) string {
 	}
 
 	return "copilot"
+}
+
+func defaultSkillDirectories(repoPath string) []string {
+	paths := make([]string, 0, 1)
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		paths = append(paths, filepath.Join(home, ".copilot", "skills"))
+	}
+	return paths
 }
 
 func encodeRawEvent(event githubcopilot.SessionEvent) (RawEvent, error) {

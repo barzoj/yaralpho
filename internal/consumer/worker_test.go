@@ -195,6 +195,113 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
 }
 
+func TestWorker_ExecutionListHappyPath(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStorage()
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+
+	eventQueue := make([]chan copilot.RawEvent, 0, 8)
+	for i := 0; i < 8; i++ {
+		eventQueue = append(eventQueue, closedChan())
+	}
+
+	cp := &fakeCopilot{
+		eventQueue: eventQueue,
+		sessionIDs: []string{"s1", "s1-verify", "s2", "s2-verify", "s3", "s3-verify", "s4", "s4-verify"},
+	}
+
+	tr := &fakeTracker{
+		epics: map[string]bool{"epic-1": true},
+		children: map[string][]string{
+			"epic-1": {"e1", "e2"},
+		},
+		titles: map[string]string{
+			"task-1": "Task One",
+			"epic-1": "Epic One",
+			"e1":     "Epic Child One",
+			"e2":     "Epic Child Two",
+			"task-2": "Task Two",
+		},
+	}
+
+	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+	}
+
+	q := queue.NewMemoryQueue(zap.NewNop())
+	w := NewWorker(q, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	startRun := 1
+	w.newRunID = func() string {
+		id := fmt.Sprintf("run-%d", startRun)
+		startRun++
+		return id
+	}
+	w.now = func() time.Time { return time.Date(2026, 2, 8, 22, 0, 0, 0, time.UTC) }
+
+	payload1, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-1"})
+	payload2, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
+	payload3, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-2"})
+	require.NoError(t, q.Enqueue(payload1))
+	require.NoError(t, q.Enqueue(payload2))
+	require.NoError(t, q.Enqueue(payload3))
+	q.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- w.Run(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		require.Fail(t, "worker did not stop")
+	}
+
+	require.Equal(t, []string{
+		"exec\n\nWork on task task-1",
+		"verify\n\nVerify task task-1",
+		"exec\n\nPick first ready task from epic epic-1 and execute",
+		"verify\n\nVerify task e1",
+		"exec\n\nPick first ready task from epic epic-1 and execute",
+		"verify\n\nVerify task e2",
+		"exec\n\nWork on task task-2",
+		"verify\n\nVerify task task-2",
+	}, cp.prompts)
+
+	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Len(t, nt.batchIdle, 1)
+	require.Equal(t, "b1", nt.batchIdle[0])
+
+	require.Len(t, nt.events, 14)
+	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "pending"}, nt.events[0])
+	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "running"}, nt.events[1])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "in_progress", Attempt: 1}, nt.events[2])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[3])
+	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "epic-1", TaskName: "Epic One", Status: "pending"}, nt.events[4])
+	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "epic-1", TaskName: "Epic One", Status: "running"}, nt.events[5])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "e1", TaskName: "Epic Child One", ParentTaskRef: "epic-1", Status: "in_progress", Attempt: 1}, nt.events[6])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "e1", TaskName: "Epic Child One", ParentTaskRef: "epic-1", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[7])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "e2", TaskName: "Epic Child Two", ParentTaskRef: "epic-1", Status: "in_progress", Attempt: 1}, nt.events[8])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "e2", TaskName: "Epic Child Two", ParentTaskRef: "epic-1", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[9])
+	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "pending"}, nt.events[10])
+	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "running"}, nt.events[11])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "in_progress", Attempt: 1}, nt.events[12])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[13])
+
+	require.Len(t, nt.finished, 8)
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[0])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[1])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-3", taskRef: "e1", status: "succeeded"}, nt.finished[2])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-4", taskRef: "e1", status: "succeeded"}, nt.finished[3])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-5", taskRef: "e2", status: "succeeded"}, nt.finished[4])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-6", taskRef: "e2", status: "succeeded"}, nt.finished[5])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-7", taskRef: "task-2", status: "succeeded"}, nt.finished[6])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-8", taskRef: "task-2", status: "succeeded"}, nt.finished[7])
+}
+
 func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()

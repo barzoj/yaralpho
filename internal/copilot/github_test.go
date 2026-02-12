@@ -74,6 +74,27 @@ func TestGitHubTokenFallbackOrder(t *testing.T) {
 	stop()
 }
 
+func TestGitHubUsesProvidedTokenOverride(t *testing.T) {
+	t.Setenv("COPILOT_GITHUB_TOKEN", "env-primary")
+	provided := "config-token"
+
+	fakeSession := &fakeSession{id: "session-config"}
+	fakeClient := &fakeClient{session: fakeSession}
+
+	gh := NewGitHubWithToken(zaptest.NewLogger(t), provided, "config")
+	gh.newClient = func(opts *githubcopilot.ClientOptions) copilotClient {
+		fakeClient.opts = opts
+		return fakeClient
+	}
+
+	sessionID, _, stop, err := gh.StartSession(context.Background(), "hi", "/repo")
+	require.NoError(t, err)
+	require.Equal(t, fakeSession.id, sessionID)
+	require.Equal(t, provided, fakeClient.opts.GithubToken)
+
+	stop()
+}
+
 func TestGitHubMissingTokenReturnsError(t *testing.T) {
 	fakeClient := &fakeClient{session: &fakeSession{id: "unused"}}
 	clientCreated := false
