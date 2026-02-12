@@ -139,11 +139,15 @@ func (noopTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Com
 	return nil, nil
 }
 
+func (noopTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+	return "", nil
+}
+
 type noopNotifier struct{}
 
 func (noopNotifier) NotifyEvent(ctx context.Context, event notify.Event) error { return nil }
 
-func (noopNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
+func (noopNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, taskName, status, commitHash string) error {
 	return nil
 }
 func (noopNotifier) NotifyBatchIdle(ctx context.Context, batchID string) error { return nil }

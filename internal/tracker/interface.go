@@ -35,4 +35,7 @@ type Tracker interface {
 	// as provided by the backend. Implementations should return an empty
 	// slice when no comments exist.
 	FetchComments(ctx context.Context, ref string) ([]Comment, error)
+
+	// GetTitle returns the issue title for the given reference.
+	GetTitle(ctx context.Context, ref string) (string, error)
 }

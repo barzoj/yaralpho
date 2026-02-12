@@ -30,7 +30,7 @@ type ExecutionTask struct {
 	newRunID    func() string
 	now         func() time.Time
 	bus         bus.Bus
-	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
+	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
 // NewExecutionTask constructs an ExecutionTask with sensible defaults for logger,
@@ -118,6 +118,6 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 		t.bus = sessionEventBus
 	}
 
-	status, messages, err := t.exec(ctx, t.copilot, t.storage, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
+	status, messages, err := t.exec(ctx, t.copilot, t.storage, t.tracker, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, epicID, prompt)
 	return status, messages, err
 }

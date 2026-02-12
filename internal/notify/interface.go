@@ -9,6 +9,7 @@ type Event struct {
 	BatchID       string
 	RunID         string
 	TaskRef       string
+	TaskName      string
 	ParentTaskRef string
 	Status        string
 	Details       string
@@ -22,7 +23,7 @@ type Event struct {
 // to transient failures and respect context cancellation.
 type Notifier interface {
 	NotifyEvent(ctx context.Context, event Event) error
-	NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error
+	NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, taskName, status, commitHash string) error
 	NotifyBatchIdle(ctx context.Context, batchID string) error
 	NotifyError(ctx context.Context, batchID, runID, taskRef string, err error) error
 }
@@ -35,7 +36,7 @@ func (Noop) NotifyEvent(ctx context.Context, event Event) error {
 	return nil
 }
 
-func (Noop) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
+func (Noop) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, taskName, status, commitHash string) error {
 	return nil
 }
 

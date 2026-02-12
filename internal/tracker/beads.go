@@ -301,4 +301,48 @@ func (b *Beads) FetchComments(ctx context.Context, ref string) ([]Comment, error
 	return comments, nil
 }
 
+// GetTitle returns the issue title for the given reference.
+func (b *Beads) GetTitle(ctx context.Context, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("ref is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, b.timeout)
+	defer cancel()
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	output, err := b.run(ctx, b.repoPath, "bd", "view", ref, "--json")
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		b.logger.Error("bd view failed", zap.String("ref", ref), zap.Error(err))
+		return "", fmt.Errorf("bd view %s: %w", ref, err)
+	}
+
+	var issues []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil {
+		b.logger.Error("parse bd view failed", zap.String("ref", ref), zap.Error(err))
+		return "", fmt.Errorf("parse bd view %s: %w", ref, err)
+	}
+	if len(issues) == 0 {
+		return "", nil
+	}
+
+	for i := range issues {
+		if issues[i].ID == ref {
+			return strings.TrimSpace(issues[i].Title), nil
+		}
+	}
+
+	return strings.TrimSpace(issues[0].Title), nil
+}
+
 var refPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)

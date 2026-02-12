@@ -9,6 +9,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
+	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -27,7 +28,7 @@ func TestVerificationTaskDelegatesToStructuredExecution(t *testing.T) {
 	)
 
 	task := NewVerificationTask(cfg, execTask, " verify prompt ")
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, run, epic, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, run, epic, prompt string) (storage.TaskRunStatus, string, error) {
 		capturedPrompt = prompt
 		runRef = run
 		epicRef = epic

@@ -73,11 +73,15 @@ func (fakeTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Com
 	return nil, nil
 }
 
+func (fakeTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+	return "", nil
+}
+
 type fakeNotifier struct{}
 
 func (fakeNotifier) NotifyEvent(ctx context.Context, event notify.Event) error { return nil }
 
-func (fakeNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
+func (fakeNotifier) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, taskName, status, commitHash string) error {
 	return nil
 }
 func (fakeNotifier) NotifyBatchIdle(ctx context.Context, batchID string) error { return nil }

@@ -55,6 +55,7 @@ type slackPayload struct {
 	BatchID    string `json:"batch_id"`
 	RunID      string `json:"run_id,omitempty"`
 	TaskRef    string `json:"task_ref,omitempty"`
+	TaskName   string `json:"task_name,omitempty"`
 	ParentTask string `json:"parent_task_ref,omitempty"`
 	Status     string `json:"status,omitempty"`
 	Details    string `json:"details,omitempty"`
@@ -72,6 +73,7 @@ func (s *Slack) NotifyEvent(ctx context.Context, event Event) error {
 		BatchID:    event.BatchID,
 		RunID:      event.RunID,
 		TaskRef:    event.TaskRef,
+		TaskName:   strings.TrimSpace(event.TaskName),
 		ParentTask: event.ParentTaskRef,
 		Status:     event.Status,
 		Details:    event.Details,
@@ -81,12 +83,13 @@ func (s *Slack) NotifyEvent(ctx context.Context, event Event) error {
 	})
 }
 
-func (s *Slack) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, status, commitHash string) error {
+func (s *Slack) NotifyTaskFinished(ctx context.Context, batchID, runID, taskRef, taskName, status, commitHash string) error {
 	return s.NotifyEvent(ctx, Event{
 		Type:       "task_finished",
 		BatchID:    batchID,
 		RunID:      runID,
 		TaskRef:    taskRef,
+		TaskName:   taskName,
 		Status:     status,
 		CommitHash: commitHash,
 	})
@@ -152,34 +155,103 @@ func (s *Slack) post(ctx context.Context, payload slackPayload) error {
 }
 
 func (s *Slack) textForEvent(event Event) string {
-	parts := []string{}
-	if event.Type != "" {
-		parts = append(parts, fmt.Sprintf("[%s]", event.Type))
-	}
-	if event.BatchID != "" {
-		parts = append(parts, fmt.Sprintf("batch=%s", event.BatchID))
-	}
-	if event.TaskRef != "" {
-		parts = append(parts, fmt.Sprintf("task=%s", event.TaskRef))
-	}
-	if event.ParentTaskRef != "" {
-		parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
-	}
-	if event.Status != "" {
-		parts = append(parts, fmt.Sprintf("status=%s", event.Status))
-	}
-	if event.Attempt > 0 {
-		segment := fmt.Sprintf("attempt=%d", event.Attempt)
-		if event.MaxAttempts > 0 {
-			segment = fmt.Sprintf("attempt=%d/%d", event.Attempt, event.MaxAttempts)
+	switch event.Type {
+	case "task_received":
+		return fmt.Sprintf("[task_received] batch=%s | task=%s%s | status=%s", event.BatchID, event.TaskRef, formatTaskName(event.TaskName), event.Status)
+	case "task_started":
+		return fmt.Sprintf("[task_started] batch=%s | start batch for task %s%s", event.BatchID, event.TaskRef, formatTaskName(event.TaskName))
+	case "attempt_started":
+		attempt := formatAttempt(event)
+		parts := []string{fmt.Sprintf("[attempt_started] batch=%s | task=%s%s", event.BatchID, event.TaskRef, formatTaskName(event.TaskName))}
+		if event.ParentTaskRef != "" {
+			parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
 		}
-		parts = append(parts, segment)
+		if event.Status != "" {
+			parts = append(parts, fmt.Sprintf("status=%s", event.Status))
+		}
+		if attempt != "" {
+			parts = append(parts, attempt)
+		}
+		return strings.Join(parts, " | ")
+	case "task_finished":
+		parts := []string{fmt.Sprintf("[task_finished] batch=%s", event.BatchID)}
+		if event.TaskRef != "" {
+			parts = append(parts, fmt.Sprintf("task=%s%s", event.TaskRef, formatTaskName(event.TaskName)))
+		}
+		if event.Status != "" {
+			parts = append(parts, fmt.Sprintf("status=%s", event.Status))
+		}
+		if event.CommitHash != "" {
+			parts = append(parts, fmt.Sprintf("commit=%s", strings.TrimSpace(event.CommitHash)))
+		}
+		return strings.Join(parts, " | ")
+	case "batch_idle":
+		return fmt.Sprintf("[batch_idle] batch=%s | status=%s", event.BatchID, event.Status)
+	case "verification_succeeded", "verification_failed", "verification_failed_retrying", "verification_failed_max_retries":
+		attempt := formatAttempt(event)
+		parts := []string{fmt.Sprintf("[%s] batch=%s | task=%s%s", event.Type, event.BatchID, event.TaskRef, formatTaskName(event.TaskName))}
+		if event.ParentTaskRef != "" {
+			parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
+		}
+		if event.Status != "" {
+			parts = append(parts, fmt.Sprintf("status=%s", event.Status))
+		}
+		if attempt != "" {
+			parts = append(parts, attempt)
+		}
+		base := strings.Join(parts, " | ")
+		if strings.TrimSpace(event.Details) == "" {
+			return base
+		}
+		return fmt.Sprintf("%s\n%s", base, event.Details)
+	default:
+		parts := []string{}
+		if event.Type != "" {
+			parts = append(parts, fmt.Sprintf("[%s]", event.Type))
+		}
+		if event.BatchID != "" {
+			parts = append(parts, fmt.Sprintf("batch=%s", event.BatchID))
+		}
+		if event.TaskRef != "" {
+			parts = append(parts, fmt.Sprintf("task=%s", event.TaskRef))
+		}
+		if event.ParentTaskRef != "" {
+			parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
+		}
+		if event.Status != "" {
+			parts = append(parts, fmt.Sprintf("status=%s", event.Status))
+		}
+		if event.Attempt > 0 {
+			segment := fmt.Sprintf("attempt=%d", event.Attempt)
+			if event.MaxAttempts > 0 {
+				segment = fmt.Sprintf("attempt=%d/%d", event.Attempt, event.MaxAttempts)
+			}
+			parts = append(parts, segment)
+		}
+		if event.Details != "" {
+			parts = append(parts, fmt.Sprintf("details=%s", event.Details))
+		}
+		if event.CommitHash != "" {
+			parts = append(parts, fmt.Sprintf("commit=%s", strings.TrimSpace(event.CommitHash)))
+		}
+		return strings.Join(parts, " | ")
 	}
-	if event.Details != "" {
-		parts = append(parts, fmt.Sprintf("details=%s", event.Details))
+}
+
+func formatTaskName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
 	}
-	if event.CommitHash != "" {
-		parts = append(parts, fmt.Sprintf("commit=%s", strings.TrimSpace(event.CommitHash)))
+	return fmt.Sprintf(" (%s)", name)
+}
+
+func formatAttempt(event Event) string {
+	if event.Attempt <= 0 {
+		return ""
 	}
-	return strings.Join(parts, " | ")
+	if event.MaxAttempts > 0 {
+		return fmt.Sprintf("attempt=%d/%d", event.Attempt, event.MaxAttempts)
+	}
+	return fmt.Sprintf("attempt=%d", event.Attempt)
 }

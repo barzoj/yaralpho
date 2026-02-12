@@ -49,6 +49,7 @@ type Worker struct {
 	now      func() time.Time
 	newRunID func() string
 	bus      bus.Bus
+	titleMap map[string]string
 }
 
 // NewWorker constructs a Worker with sensible defaults for logger, notifier,
@@ -121,7 +122,8 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		return fmt.Errorf("queue item missing batch_id or task_ref")
 	}
 
-	w.notifyTaskEvent(ctx, notify.Event{Type: "task_received", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "pending"})
+	taskName := w.taskTitle(ctx, item.TaskRef)
+	w.notifyTaskEvent(ctx, notify.Event{Type: "task_received", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: taskName, Status: "pending"})
 
 	batch, err := w.storage.GetBatch(ctx, item.BatchID)
 	if err != nil {
@@ -129,7 +131,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		return fmt.Errorf("get batch %s: %w", item.BatchID, err)
 	}
 	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusRunning)
-	w.notifyTaskEvent(ctx, notify.Event{Type: "task_started", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "running"})
+	w.notifyTaskEvent(ctx, notify.Event{Type: "task_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: taskName, Status: "running"})
 
 	runs, err := w.storage.ListTaskRuns(ctx, item.BatchID)
 	if err != nil {
@@ -155,7 +157,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 	attempts := 0
 	for {
 		attempts++
-		w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "in_progress", Attempt: attempts, Details: fmt.Sprintf("attempt=%d", attempts)})
+		w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, item.TaskRef), Status: "in_progress", Attempt: attempts})
 		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
 		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
 		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, "", execInstruction, verifyInstruction)
@@ -170,7 +172,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 		}
 
 		if verifyStatus == storage.TaskRunStatusSucceeded {
-			w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: item.TaskRef, Status: "succeeded", Attempt: attempts, Details: fmt.Sprintf("attempt=%d", attempts)})
+			w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, item.TaskRef), Status: "succeeded", Attempt: attempts, Details: formatAgentResponseText(agentResp, output)})
 			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
 			return nil
 		}
@@ -202,17 +204,12 @@ func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item Queu
 		runRecorded := false
 		for {
 			attempts++
-			w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: child, ParentTaskRef: item.TaskRef, Status: "in_progress", Attempt: attempts, Details: fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef)})
+			w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: child, TaskName: w.taskTitle(ctx, child), ParentTaskRef: item.TaskRef, Status: "in_progress", Attempt: attempts})
 			execInstruction := fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef)
 			verifyInstruction := fmt.Sprintf("Verify task %s", child)
 			verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, child, item.TaskRef, execInstruction, verifyInstruction)
 			if err != nil {
 				return err
-			}
-
-			if !runRecorded {
-				runs = append(runs, storage.TaskRunSummary{TaskRun: storage.TaskRun{TaskRef: child}})
-				runRecorded = true
 			}
 
 			if agentResp.Status == "failure" {
@@ -222,7 +219,11 @@ func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item Queu
 			}
 
 			if verifyStatus == storage.TaskRunStatusSucceeded {
-				w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: child, ParentTaskRef: item.TaskRef, Status: "succeeded", Attempt: attempts, Details: fmt.Sprintf("attempt=%d epic=%s", attempts, item.TaskRef)})
+				if !runRecorded {
+					runs = append(runs, storage.TaskRunSummary{TaskRun: storage.TaskRun{TaskRef: child, Status: verifyStatus}})
+					runRecorded = true
+				}
+				w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: child, TaskName: w.taskTitle(ctx, child), ParentTaskRef: item.TaskRef, Status: "succeeded", Attempt: attempts, Details: formatAgentResponseText(agentResp, output)})
 				break
 			}
 
@@ -264,8 +265,8 @@ func (w *Worker) shouldRetry(ctx context.Context, batch *storage.Batch, batchID,
 		w.logger.Warn("add tracker comment for failed verification", zap.Error(err), zap.String("task_ref", taskRef))
 	}
 
-	info := fmt.Sprintf("attempt=%d reason=%s details=%s", attempts, agentResp.Reason, agentResp.Details)
-	w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed", BatchID: batchID, TaskRef: taskRef, Status: "failed", Attempt: attempts, MaxAttempts: retries, Details: info})
+	baseDetails := formatAgentResponseText(agentResp, "")
+	w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed", BatchID: batchID, TaskRef: taskRef, TaskName: w.taskTitle(ctx, taskRef), Status: "failed", Attempt: attempts, MaxAttempts: retries, Details: baseDetails})
 
 	if !hasRetries {
 		return false
@@ -274,12 +275,14 @@ func (w *Worker) shouldRetry(ctx context.Context, batch *storage.Batch, batchID,
 	if attempts >= retries {
 		w.logger.Info("max verification attempts reached; marking batch as failed", zap.String("batch_id", batchID), zap.Int("attempts", attempts), zap.Int("max_retries", retries))
 		setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
-		w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed_max_retries", BatchID: batchID, TaskRef: taskRef, Status: "failed", Attempt: attempts, MaxAttempts: retries, Details: info})
+		details := appendDetailLine(baseDetails, "Next: no retries remaining")
+		w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed_max_retries", BatchID: batchID, TaskRef: taskRef, TaskName: w.taskTitle(ctx, taskRef), Status: "failed", Attempt: attempts, MaxAttempts: retries, Details: details})
 		_ = w.notifier.NotifyError(ctx, batchID, "", taskRef, fmt.Errorf("verification failed after %d attempts: %s", attempts, agentResp.Reason))
 		return false
 	}
 
-	w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed_retrying", BatchID: batchID, TaskRef: taskRef, Status: "retrying", Attempt: attempts, MaxAttempts: retries, Details: fmt.Sprintf("%s retry_in=%d", info, retries-attempts)})
+	retryDetails := appendDetailLine(baseDetails, fmt.Sprintf("Next: retrying (%d attempts remaining)", retries-attempts))
+	w.notifyTaskEvent(ctx, notify.Event{Type: "verification_failed_retrying", BatchID: batchID, TaskRef: taskRef, TaskName: w.taskTitle(ctx, taskRef), Status: "retrying", Attempt: attempts, MaxAttempts: retries, Details: retryDetails})
 	return true
 }
 
@@ -312,6 +315,60 @@ func (w *Worker) parseMaxRetries() (int, bool) {
 	return maxRetries, true
 }
 
+func (w *Worker) taskTitle(ctx context.Context, taskRef string) string {
+	taskRef = strings.TrimSpace(taskRef)
+	if taskRef == "" || w.tracker == nil {
+		return ""
+	}
+	if w.titleMap != nil {
+		if title, ok := w.titleMap[taskRef]; ok {
+			return title
+		}
+	}
+
+	title, err := w.tracker.GetTitle(ctx, taskRef)
+	if err != nil {
+		w.logger.Warn("fetch task title", zap.Error(err), zap.String("task_ref", taskRef))
+		return ""
+	}
+	title = strings.TrimSpace(title)
+	if w.titleMap == nil {
+		w.titleMap = make(map[string]string)
+	}
+	w.titleMap[taskRef] = title
+	return title
+}
+
+func formatAgentResponseText(resp AgentStructuredResponse, rawOutput string) string {
+	lines := []string{}
+	reason := strings.TrimSpace(resp.Reason)
+	if reason != "" {
+		lines = append(lines, fmt.Sprintf("Reason: %s", reason))
+	}
+	details := strings.TrimSpace(resp.Details)
+	if details != "" {
+		lines = append(lines, fmt.Sprintf("Details: %s", details))
+	}
+	if len(lines) > 0 {
+		return strings.Join(lines, "\n")
+	}
+	if raw := strings.TrimSpace(rawOutput); raw != "" {
+		return fmt.Sprintf("Response: %s", raw)
+	}
+	return "Agent response unavailable."
+}
+
+func appendDetailLine(base, line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return base
+	}
+	if strings.TrimSpace(base) == "" {
+		return line
+	}
+	return fmt.Sprintf("%s\n%s", base, line)
+}
+
 func isSessionIdleEvent(evt copilot.RawEvent) bool {
 	val, ok := evt["type"]
 	if !ok {
@@ -329,6 +386,9 @@ func isSessionIdleEvent(evt copilot.RawEvent) bool {
 func firstAvailableChild(children []string, runs []storage.TaskRunSummary) (string, bool) {
 	seen := make(map[string]struct{}, len(runs))
 	for _, r := range runs {
+		if !isRunCompleted(r) {
+			continue
+		}
 		seen[strings.TrimSpace(r.TaskRef)] = struct{}{}
 	}
 
@@ -342,6 +402,15 @@ func firstAvailableChild(children []string, runs []storage.TaskRunSummary) (stri
 		}
 	}
 	return "", false
+}
+
+func isRunCompleted(run storage.TaskRunSummary) bool {
+	switch run.Status {
+	case storage.TaskRunStatusSucceeded, storage.TaskRunStatusStopped:
+		return true
+	default:
+		return false
+	}
 }
 
 func buildPrompt(basePrompt, fallback string) string {

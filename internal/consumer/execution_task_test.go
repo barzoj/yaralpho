@@ -29,7 +29,7 @@ func TestExecutionTaskBuildsPromptWithComments(t *testing.T) {
 	execCalls := 0
 
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "task instruction")
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error) {
 		execCalls++
 		capturedPrompt = prompt
 		require.Equal(t, "/repo", repoPath)
@@ -56,7 +56,7 @@ func TestExecutionTaskWithoutCommentsUsesBasePrompt(t *testing.T) {
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), " /repo ", "   ")
 
 	var prompt string
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, p string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, p string) (storage.TaskRunStatus, string, error) {
 		prompt = p
 		require.Equal(t, "/repo", repoPath)
 		return storage.TaskRunStatusSucceeded, "", nil
@@ -76,7 +76,7 @@ func TestExecutionTaskPropagatesFetchError(t *testing.T) {
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "base instruction")
 
 	called := false
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error) {
 		called = true
 		return storage.TaskRunStatusSucceeded, "", nil
 	}
@@ -114,4 +114,8 @@ func (s *stubExecutionTracker) FetchComments(ctx context.Context, ref string) ([
 		return nil, s.err
 	}
 	return s.comments, nil
+}
+
+func (s *stubExecutionTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+	return "", nil
 }

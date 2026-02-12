@@ -221,6 +221,42 @@ func TestBeadsAddCommentWithTempFile(t *testing.T) {
 	}
 }
 
+func TestBeadsGetTitleReturnsMatch(t *testing.T) {
+	output := `[{"id":"ref-1","title":"Task One"}]`
+	runner := &fakeRunner{output: []byte(output)}
+	b := &Beads{
+		repoPath: "/repo",
+		logger:   zap.NewNop(),
+		timeout:  time.Second,
+		run:      runner.run,
+	}
+
+	title, err := b.GetTitle(context.Background(), "ref-1")
+	if err != nil {
+		t.Fatalf("GetTitle error: %v", err)
+	}
+	if title != "Task One" {
+		t.Fatalf("title = %q, want %q", title, "Task One")
+	}
+	if got, wantArg := runner.args, []string{"bd", "view", "ref-1", "--json"}; !equalStrings(got, wantArg) {
+		t.Fatalf("args = %#v, want %#v", got, wantArg)
+	}
+}
+
+func TestBeadsGetTitlePropagatesError(t *testing.T) {
+	runner := &fakeRunner{err: errors.New("boom")}
+	b := &Beads{
+		repoPath: "/repo",
+		logger:   zap.NewNop(),
+		timeout:  time.Second,
+		run:      runner.run,
+	}
+
+	if _, err := b.GetTitle(context.Background(), "ref-1"); err == nil {
+		t.Fatalf("expected error from runner")
+	}
+}
+
 func TestBeadsAddCommentPropagatesRunnerError(t *testing.T) {
 	runner := &fakeRunner{err: errors.New("boom")}
 	b := &Beads{

@@ -10,6 +10,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
+	"github.com/barzoj/yaralpho/internal/tracker"
 	"go.uber.org/zap"
 )
 
@@ -35,6 +36,7 @@ func executeTask(
 	ctx context.Context,
 	cp copilot.Client,
 	st storage.Storage,
+	tr tracker.Tracker,
 	nt notify.Notifier,
 	logger *zap.Logger,
 	repoPath string,
@@ -46,6 +48,15 @@ func executeTask(
 	prompt string,
 ) (storage.TaskRunStatus, error) {
 	runID := newRunID()
+	taskName := ""
+	if tr != nil {
+		name, err := tr.GetTitle(ctx, runRef)
+		if err != nil {
+			logger.Warn("fetch task title", zap.Error(err), zap.String("task_ref", runRef))
+		} else {
+			taskName = strings.TrimSpace(name)
+		}
+	}
 
 	sessionID, events, stop, err := cp.StartSession(ctx, prompt, repoPath)
 	if err != nil {
@@ -140,7 +151,7 @@ eventLoop:
 
 	switch status {
 	case storage.TaskRunStatusSucceeded:
-		_ = nt.NotifyTaskFinished(ctx, batch.ID, run.ID, run.TaskRef, string(run.Status), "")
+		_ = nt.NotifyTaskFinished(ctx, batch.ID, run.ID, run.TaskRef, taskName, string(run.Status), "")
 	case storage.TaskRunStatusStopped:
 		_ = nt.NotifyBatchIdle(ctx, batch.ID)
 		setBatchStatus(ctx, st, logger, batch, storage.BatchStatusIdle)
@@ -159,6 +170,7 @@ func executeTaskWithStructuredOutput(
 	ctx context.Context,
 	cp copilot.Client,
 	st storage.Storage,
+	tr tracker.Tracker,
 	nt notify.Notifier,
 	logger *zap.Logger,
 	repoPath string,
@@ -175,7 +187,7 @@ func executeTaskWithStructuredOutput(
 
 	// Capture the run ID up front so we can retrieve the persisted run and its session events after execution.
 	generatedRunID := newRunID()
-	status, err := executeTask(ctx, cp, st, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
+	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
 
 	structuredOutput := ""
 	if st == nil || generatedRunID == "" {
@@ -208,6 +220,7 @@ func executeTaskWithAssistantMessages(
 	ctx context.Context,
 	cp copilot.Client,
 	st storage.Storage,
+	tr tracker.Tracker,
 	nt notify.Notifier,
 	logger *zap.Logger,
 	repoPath string,
@@ -223,7 +236,7 @@ func executeTaskWithAssistantMessages(
 	}
 
 	generatedRunID := newRunID()
-	status, err := executeTask(ctx, cp, st, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
+	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
 
 	if st == nil || generatedRunID == "" {
 		return status, "", err

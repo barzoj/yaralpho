@@ -10,6 +10,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
 	"github.com/barzoj/yaralpho/internal/storage"
+	"github.com/barzoj/yaralpho/internal/tracker"
 	"go.uber.org/zap"
 )
 
@@ -19,7 +20,7 @@ type VerificationTask struct {
 	cfg           config.Config
 	executionTask *ExecutionTask
 	instruction   string
-	exec          func(ctx context.Context, cp copilot.Client, st storage.Storage, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
+	exec          func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
 // NewVerificationTask constructs a VerificationTask bound to an ExecutionTask
@@ -74,5 +75,5 @@ func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, ta
 		prompt = fmt.Sprintf(prompt, taskID)
 	}
 
-	return t.exec(ctx, t.executionTask.copilot, t.executionTask.storage, notifier, logger, repoPath, newRunID, now, batch, taskID, epicID, prompt)
+	return t.exec(ctx, t.executionTask.copilot, t.executionTask.storage, t.executionTask.tracker, notifier, logger, repoPath, newRunID, now, batch, taskID, epicID, prompt)
 }
