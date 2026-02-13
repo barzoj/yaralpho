@@ -1,0 +1,19 @@
+{
+  "name": "@yaralpho/copilot-codex-wrapper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex SDK wrapper process for yaralpho",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "package:linux-x64": "npm run build && mkdir -p bin && bun build --compile dist/main.js --outfile bin/codex-wrapper-linux-x64"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.101.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^5.0.0"
+  }
+}

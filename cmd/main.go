@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -14,26 +15,25 @@ import (
 	"go.uber.org/zap"
 )
 
-func main() {
-	var configPath string
-	var logLevel string
-	flag.StringVar(&configPath, "config", "", "optional path to config JSON file")
-	flag.StringVar(&logLevel, "debug-level", "info", "log verbosity: info (default), warn, debug")
-	flag.Parse()
+type cliOptions struct {
+	ConfigPath string
+	LogLevel   string
+	Agent      string
+}
 
-	levelText := strings.ToLower(strings.TrimSpace(logLevel))
-	switch levelText {
-	case "", "info":
-		levelText = "info"
-	case "warn", "debug":
-	default:
-		fmt.Fprintf(os.Stderr, "invalid debug-level %q (allowed: info, warn, debug)\n", logLevel)
+var buildWithOptions = app.BuildWithOptions
+
+func main() {
+	opts, err := parseCLIOptions(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(2)
 	}
 
+	levelText := opts.LogLevel
 	zapConfig := zap.NewProductionConfig()
 	if err := zapConfig.Level.UnmarshalText([]byte(levelText)); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to parse debug-level %q: %v\n", logLevel, err)
+		fmt.Fprintf(os.Stderr, "failed to parse debug-level %q: %v\n", opts.LogLevel, err)
 		os.Exit(2)
 	}
 
@@ -44,12 +44,12 @@ func main() {
 	}
 	defer logger.Sync()
 
-	cfg, err := config.LoadWithPath(logger, configPath)
+	cfg, err := config.LoadWithPath(logger, opts.ConfigPath)
 	if err != nil {
 		logger.Fatal("load config", zap.Error(err))
 	}
 
-	application, err := app.Build(context.Background(), logger, cfg)
+	application, err := buildApplication(context.Background(), logger, cfg, opts.Agent)
 	if err != nil {
 		logger.Fatal("build app", zap.Error(err))
 	}
@@ -60,4 +60,42 @@ func main() {
 	if err := application.Run(ctx); err != nil {
 		logger.Fatal("run app", zap.Error(err))
 	}
+}
+
+func parseCLIOptions(args []string) (cliOptions, error) {
+	var opts cliOptions
+	fs := flag.NewFlagSet("yaralpho", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&opts.ConfigPath, "config", "", "optional path to config JSON file")
+	fs.StringVar(&opts.LogLevel, "debug-level", "info", "log verbosity: info (default), warn, debug")
+	fs.StringVar(&opts.Agent, "agent", "codex", "agent provider: codex (default), github")
+	if err := fs.Parse(args); err != nil {
+		return cliOptions{}, err
+	}
+
+	levelText := strings.ToLower(strings.TrimSpace(opts.LogLevel))
+	switch levelText {
+	case "", "info":
+		opts.LogLevel = "info"
+	case "warn", "debug":
+		opts.LogLevel = levelText
+	default:
+		return cliOptions{}, fmt.Errorf("invalid debug-level %q (allowed: info, warn, debug)", opts.LogLevel)
+	}
+
+	agent := strings.ToLower(strings.TrimSpace(opts.Agent))
+	switch agent {
+	case "", "codex":
+		opts.Agent = "codex"
+	case "github":
+		opts.Agent = "github"
+	default:
+		return cliOptions{}, fmt.Errorf("invalid agent %q (allowed: codex, github)", opts.Agent)
+	}
+
+	return opts, nil
+}
+
+func buildApplication(ctx context.Context, logger *zap.Logger, cfg config.Config, agent string) (*app.App, error) {
+	return buildWithOptions(ctx, logger, cfg, app.BuildOptions{Agent: agent})
 }

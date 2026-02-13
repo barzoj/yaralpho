@@ -97,6 +97,16 @@ func (fakeCopilot) StartSession(ctx context.Context, prompt, repoPath string) (s
 	return "s1", ch, func() {}, nil
 }
 
+type taggedCopilot struct {
+	tag string
+}
+
+func (t taggedCopilot) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan copilot.RawEvent, func(), error) {
+	ch := make(chan copilot.RawEvent)
+	close(ch)
+	return t.tag, ch, func() {}, nil
+}
+
 type fakeConsumer struct {
 	mu    sync.Mutex
 	calls int
@@ -179,4 +189,81 @@ func TestRunStartsConsumerOnce(t *testing.T) {
 
 	err = a.Run(context.Background())
 	require.Error(t, err)
+}
+
+func TestBuildWithOptionsSelectsAgent(t *testing.T) {
+	cfg := fakeConfig{
+		config.PortKey:     "0",
+		config.MongoURIKey: "mongodb://example",
+		config.MongoDBKey:  "db",
+		config.RepoPathKey: "/repo",
+		config.BdRepoKey:   "/repo",
+	}
+
+	origNewStorage := newStorage
+	origNewTracker := newTracker
+	origNewNotifier := newNotifier
+	origNewGitHubClient := newGitHubClient
+	origNewCodexClient := newCodexClient
+	origNewWorker := newWorker
+	t.Cleanup(func() {
+		newStorage = origNewStorage
+		newTracker = origNewTracker
+		newNotifier = origNewNotifier
+		newGitHubClient = origNewGitHubClient
+		newCodexClient = origNewCodexClient
+		newWorker = origNewWorker
+	})
+
+	newStorage = func(ctx context.Context, uri, db string, logger *zap.Logger) (storage.Storage, error) {
+		return &fakeStorage{}, nil
+	}
+	newTracker = func(cfg config.Config, logger *zap.Logger) (tracker.Tracker, error) {
+		return fakeTracker{}, nil
+	}
+	newNotifier = func(cfg config.Config, logger *zap.Logger) (notify.Notifier, error) {
+		return fakeNotifier{}, nil
+	}
+	newGitHubClient = func(logger *zap.Logger) copilot.Client {
+		return taggedCopilot{tag: "github"}
+	}
+	newCodexClient = func(logger *zap.Logger) copilot.Client {
+		return taggedCopilot{tag: "codex"}
+	}
+
+	tests := []struct {
+		name      string
+		agent     string
+		wantTag   string
+		wantError string
+	}{
+		{name: "default agent uses codex", agent: "", wantTag: "codex"},
+		{name: "explicit codex", agent: "codex", wantTag: "codex"},
+		{name: "explicit github", agent: "github", wantTag: "github"},
+		{name: "invalid agent errors", agent: "invalid", wantError: "unknown agent"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var selected copilot.Client
+			newWorker = func(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) Consumer {
+				selected = cp
+				return &fakeConsumer{}
+			}
+
+			a, err := BuildWithOptions(context.Background(), zap.NewNop(), cfg, BuildOptions{Agent: tc.agent})
+			if tc.wantError != "" {
+				require.Error(t, err)
+				require.ErrorContains(t, err, tc.wantError)
+				require.Nil(t, a)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, a)
+			cp, ok := selected.(taggedCopilot)
+			require.True(t, ok)
+			require.Equal(t, tc.wantTag, cp.tag)
+		})
+	}
 }

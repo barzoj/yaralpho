@@ -96,6 +96,10 @@ func TestGitHubUsesProvidedTokenOverride(t *testing.T) {
 }
 
 func TestGitHubMissingTokenReturnsError(t *testing.T) {
+	t.Setenv("COPILOT_GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
 	fakeClient := &fakeClient{session: &fakeSession{id: "unused"}}
 	clientCreated := false
 
@@ -149,6 +153,7 @@ func TestGitHubForwardsEventsAndStopCloses(t *testing.T) {
 func TestGitHubAddsGlobalSkillDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("COPILOT_GITHUB_TOKEN", "token")
 
 	fakeSession := &fakeSession{id: "session-skills"}
 	fakeClient := &fakeClient{session: fakeSession}

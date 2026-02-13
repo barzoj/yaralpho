@@ -55,3 +55,8 @@ yaralpho.bin
 # intenal
 /plans
 sync_plan_to_beads.py
+
+# codex wrapper (typescript) generated artifacts
+internal/copilot/codex-ts/node_modules/
+internal/copilot/codex-ts/dist/
+internal/copilot/codex-ts/bin/

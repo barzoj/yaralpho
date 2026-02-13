@@ -2,6 +2,53 @@
 
 Ralph Runner is a Go 1.21+ service that ingests work items, classifies them, and drives a Copilot-powered agent loop with storage, tracking, queueing, and Slack notifications.
 
+## Agent providers
+
+Startup agent selection is explicit via `--agent`, and defaults to `codex`.
+
+- Allowed values: `codex` (default), `github`
+- Invalid values fail fast at process start (exit code `2`)
+- There is no silent fallback to another provider
+
+Examples:
+
+```bash
+# Default (equivalent to --agent=codex)
+go run ./cmd
+
+# Explicit Codex provider
+go run ./cmd --agent=codex
+
+# GitHub Copilot provider
+go run ./cmd --agent=github
+```
+
+### Codex wrapper requirements
+
+The Codex provider launches a local wrapper binary. On startup it resolves the
+wrapper path in this order:
+
+1. `YARALPHO_CODEX_WRAPPER_PATH` (environment override)
+2. `internal/copilot/codex-ts/bin/codex-wrapper-linux-x64` relative to the current process working directory
+
+If the selected wrapper path is missing, is a directory, or is not executable,
+startup fails immediately with an explicit error.
+
+Build/package the Linux x64 wrapper:
+
+```bash
+cd internal/copilot/codex-ts
+npm run package:linux-x64
+```
+
+`npm run package:linux-x64` uses `bun build --compile`, so Bun must be installed and on `PATH`.
+
+### Session completion compatibility
+
+To keep consumer behavior compatible with existing run loops, the Codex client
+emits a synthetic terminal event with `type=session.idle` when the wrapper
+process exits cleanly.
+
 ## How it works
 
 - **Queue + single consumer:** `/add` enqueues work into an in-memory FIFO queue; one consumer pulls items sequentially, so only one task runs at a time and order is preserved.

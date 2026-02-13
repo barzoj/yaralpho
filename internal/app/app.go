@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,32 @@ import (
 type Consumer interface {
 	Run(ctx context.Context) error
 }
+
+// BuildOptions controls provider selection at composition time.
+type BuildOptions struct {
+	Agent string
+}
+
+var (
+	newStorage func(ctx context.Context, uri, dbName string, logger *zap.Logger) (storage.Storage, error) = func(ctx context.Context, uri, dbName string, logger *zap.Logger) (storage.Storage, error) {
+		return mongostorage.New(ctx, uri, dbName, logger)
+	}
+	newTracker func(cfg config.Config, logger *zap.Logger) (tracker.Tracker, error) = func(cfg config.Config, logger *zap.Logger) (tracker.Tracker, error) {
+		return tracker.NewBeads(cfg, logger)
+	}
+	newNotifier func(cfg config.Config, logger *zap.Logger) (notify.Notifier, error) = func(cfg config.Config, logger *zap.Logger) (notify.Notifier, error) {
+		return notify.NewSlack(cfg, logger)
+	}
+	newGitHubClient = func(logger *zap.Logger) copilot.Client {
+		return copilot.NewGitHub(logger)
+	}
+	newCodexClient = func(logger *zap.Logger) copilot.Client {
+		return copilot.NewCodex(logger)
+	}
+	newWorker = func(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) Consumer {
+		return consumer.NewWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
+	}
+)
 
 // App wires the Ralph Runner dependencies, HTTP router, and background
 // consumer. Run starts the HTTP server and consumer and blocks until context
@@ -53,6 +80,12 @@ type App struct {
 // Build constructs the production App using concrete implementations. All
 // dependencies are derived from the provided config and logger.
 func Build(ctx context.Context, logger *zap.Logger, cfg config.Config) (*App, error) {
+	return BuildWithOptions(ctx, logger, cfg, BuildOptions{})
+}
+
+// BuildWithOptions constructs the production App using concrete
+// implementations and provider-selection options.
+func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config, opts BuildOptions) (*App, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -76,27 +109,42 @@ func Build(ctx context.Context, logger *zap.Logger, cfg config.Config) (*App, er
 		return nil, fmt.Errorf("get repo path: %w", err)
 	}
 
-	st, err := mongostorage.New(ctx, mongoURI, mongoDB, logger)
+	st, err := newStorage(ctx, mongoURI, mongoDB, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init mongo storage: %w", err)
 	}
 
 	q := queue.NewMemoryQueue(logger)
 
-	tr, err := tracker.NewBeads(cfg, logger)
+	tr, err := newTracker(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init tracker: %w", err)
 	}
 
-	nt, err := notify.NewSlack(cfg, logger)
+	nt, err := newNotifier(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init notifier: %w", err)
 	}
 
-	cp := copilot.NewGitHub(logger)
-	cons := consumer.NewWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
+	cp, err := copilotClientForAgent(logger, opts.Agent)
+	if err != nil {
+		return nil, err
+	}
+
+	cons := newWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
 
 	return New(logger, cfg, st, q, tr, nt, cp, cons)
+}
+
+func copilotClientForAgent(logger *zap.Logger, agent string) (copilot.Client, error) {
+	switch strings.ToLower(strings.TrimSpace(agent)) {
+	case "", "codex":
+		return newCodexClient(logger), nil
+	case "github":
+		return newGitHubClient(logger), nil
+	default:
+		return nil, fmt.Errorf("unknown agent %q (allowed: codex, github)", agent)
+	}
 }
 
 // New assembles an App from already-constructed interfaces. It is primarily
