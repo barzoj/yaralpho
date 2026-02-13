@@ -49,6 +49,18 @@
     },
     "hook.end": { emoji: "🪝", label: "Hook end" },
     "hook.start": { emoji: "🪝", label: "Hook start" },
+    "item.completed": {
+      emoji: "✅",
+      label: "Item completed",
+      render: renderCodexItemCompleted,
+      summary: (data, evt) => formatCodexItemSummary(evt),
+    },
+    "item.started": {
+      emoji: "🟡",
+      label: "Item started",
+      render: renderCodexItemStarted,
+      summary: (data, evt) => formatCodexItemSummary(evt),
+    },
     "pending_messages.modified": {
       emoji: "⏳",
       label: "Pending messages updated",
@@ -110,6 +122,11 @@
       label: "Subagent started",
       summary: (data) => data?.agentDisplayName || data?.agentName,
     },
+    "thread.started": {
+      emoji: "🧵",
+      label: "Thread started",
+      render: renderCodexThreadStarted,
+    },
     "system.message": {
       emoji: "🛡️",
       label: "System message",
@@ -138,6 +155,16 @@
       summary: (data) => formatToolSummary(data),
     },
     "tool.user_requested": { emoji: "🙋", label: "Tool requested by user" },
+    "turn.completed": {
+      emoji: "🏁",
+      label: "Turn completed",
+      render: renderCodexTurnCompleted,
+    },
+    "turn.started": {
+      emoji: "▶️",
+      label: "Turn started",
+      render: renderCodexTurnStarted,
+    },
     "user.message": {
       emoji: "🧑",
       label: "User message",
@@ -349,6 +376,10 @@
 
   function getEventData(evt) {
     return (evt && (evt.event?.data || evt.data)) || {};
+  }
+
+  function getRawEvent(evt) {
+    return (evt && (evt.event || evt)) || {};
   }
 
   function formatUsageSummary(data) {
@@ -685,6 +716,112 @@
     summary.className = "event-summary";
     summary.textContent = "Idle heartbeat";
     return summary;
+  }
+
+  function formatCodexItemSummary(evt) {
+    const raw = getRawEvent(evt);
+    const item = raw?.item || {};
+    const itemType = item?.type || "item";
+    switch (itemType) {
+      case "agent_message":
+      case "reasoning": {
+        const text = truncateText(item?.text || "", 160);
+        return text ? `${itemType} • ${text}` : itemType;
+      }
+      case "command_execution": {
+        const command = truncateText(item?.command || "", 120);
+        const status = item?.status || "";
+        const exitCode =
+          item?.exit_code === null || item?.exit_code === undefined
+            ? ""
+            : `exit ${item.exit_code}`;
+        return [itemType, status, exitCode, command].filter(Boolean).join(" • ");
+      }
+      case "file_change": {
+        const changes = Array.isArray(item?.changes) ? item.changes : [];
+        if (!changes.length) return itemType;
+        const firstPath = changes[0]?.path ? truncateText(changes[0].path, 80) : "";
+        return [itemType, `${changes.length} change(s)`, firstPath].filter(Boolean).join(" • ");
+      }
+      default:
+        return itemType;
+    }
+  }
+
+  function renderCodexThreadStarted(evt) {
+    const raw = getRawEvent(evt);
+    const threadId = raw?.thread_id || "(no thread id)";
+    return createChatBubble(`Thread ${threadId}`, "chat-system", "Thread started");
+  }
+
+  function renderCodexTurnStarted() {
+    return createChatBubble("Turn started", "chat-system", "Turn started");
+  }
+
+  function renderCodexTurnCompleted(evt) {
+    const raw = getRawEvent(evt);
+    const usage = raw?.usage || {};
+    const chips = [
+      createMetricChip("Input", formatNumber(usage?.input_tokens)),
+      createMetricChip("Output", formatNumber(usage?.output_tokens)),
+      createMetricChip("Cached input", formatNumber(usage?.cached_input_tokens)),
+    ];
+    return renderMetricsRow(chips, "Turn completed");
+  }
+
+  function renderCodexItemStarted(evt) {
+    const raw = getRawEvent(evt);
+    const item = raw?.item || {};
+    if (item?.type === "command_execution") {
+      const command = truncateText(item?.command || "", 220);
+      const text = [item.type, item?.status || "in_progress", command]
+        .filter(Boolean)
+        .join("\n");
+      return createChatBubble(text, "chat-system", "Command started");
+    }
+    return createChatBubble(formatCodexItemSummary(evt), "chat-system", "Item started");
+  }
+
+  function renderCodexItemCompleted(evt) {
+    const raw = getRawEvent(evt);
+    const item = raw?.item || {};
+
+    if (item?.type === "agent_message") {
+      return createChatBubble(item?.text || "", "chat-assistant", "(no content)");
+    }
+    if (item?.type === "reasoning") {
+      return createChatBubble(item?.text || "", "chat-assistant", "(reasoning not provided)");
+    }
+    if (item?.type === "command_execution") {
+      const command = truncateText(item?.command || "", 220);
+      const exitCode =
+        item?.exit_code === null || item?.exit_code === undefined
+          ? ""
+          : `exit ${item.exit_code}`;
+      const text = [
+        item.type,
+        item?.status || "completed",
+        exitCode,
+        command,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return createChatBubble(text, "chat-system", "Command completed");
+    }
+    if (item?.type === "file_change") {
+      const changes = Array.isArray(item?.changes) ? item.changes : [];
+      const lines = [`File changes: ${changes.length}`];
+      changes.slice(0, 5).forEach((change) => {
+        lines.push(
+          [change?.kind || "change", truncateText(change?.path || "", 140)]
+            .filter(Boolean)
+            .join(" • ")
+        );
+      });
+      return createChatBubble(lines.join("\n"), "chat-system", "File changes");
+    }
+
+    return createChatBubble(formatCodexItemSummary(evt), "chat-system", "Item completed");
   }
 
   function formatEventSummary(evt, meta) {
@@ -1397,6 +1534,12 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports.RunLayout = layoutApi;
     module.exports.RunList = { buildRunsTable, renderRuns };
+    module.exports.EventRender = {
+      getEventType,
+      getEventMeta,
+      renderEventsList,
+      formatCodexItemSummary,
+    };
   }
 
   function start() {
