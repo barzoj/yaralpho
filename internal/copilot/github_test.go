@@ -146,6 +146,27 @@ func TestGitHubForwardsEventsAndStopCloses(t *testing.T) {
 	fakeSession.emit(event)
 }
 
+func TestGitHubAddsGlobalSkillDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	fakeSession := &fakeSession{id: "session-skills"}
+	fakeClient := &fakeClient{session: fakeSession}
+
+	gh := NewGitHub(zaptest.NewLogger(t))
+	gh.newClient = func(opts *githubcopilot.ClientOptions) copilotClient {
+		fakeClient.opts = opts
+		return fakeClient
+	}
+
+	_, _, stop, err := gh.StartSession(context.Background(), "hi", "/repo")
+	require.NoError(t, err)
+	require.NotNil(t, fakeClient.sessionConfig)
+	require.Contains(t, fakeClient.sessionConfig.SkillDirectories, filepath.Join(home, ".copilot", "skills"))
+
+	stop()
+}
+
 func TestResolveCLIPathEnvOverride(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	override := "/custom/copilot"

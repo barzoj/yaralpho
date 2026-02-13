@@ -93,11 +93,7 @@ func Build(ctx context.Context, logger *zap.Logger, cfg config.Config) (*App, er
 		return nil, fmt.Errorf("init notifier: %w", err)
 	}
 
-	token, err := cfg.Get(config.CopilotTokenKey)
-	if err != nil {
-		return nil, fmt.Errorf("get copilot token: %w", err)
-	}
-	cp := copilot.NewGitHubWithToken(logger, token, config.CopilotTokenKey)
+	cp := copilot.NewGitHub(logger)
 	cons := consumer.NewWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
 
 	return New(logger, cfg, st, q, tr, nt, cp, cons)
