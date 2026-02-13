@@ -95,6 +95,27 @@ var requiredKeys = []string{
 	CopilotTokenKey,
 }
 
+var envOverrideKeys = []string{
+	MongoURIKey,
+	MongoDBKey,
+	RepoPathKey,
+	BdRepoKey,
+	PortKey,
+	SlackWebhookKey,
+	CopilotTokenKey,
+	GhTokenKey,
+	GithubTokenKey,
+	MaxRetriesKey,
+	ExecutionTaskPromptKey,
+	VerificationTaskPromptKey,
+}
+
+var secretKeys = map[string]struct{}{
+	CopilotTokenKey: {},
+	GhTokenKey:      {},
+	GithubTokenKey:  {},
+}
+
 // LoggableKeys lists configuration keys safe to emit in logs. Token values are
 // intentionally excluded to avoid leaking credentials.
 func LoggableKeys() []string {
@@ -145,21 +166,11 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 	}
 
 	// Apply env overrides
-	for _, key := range []string{
-		MongoURIKey,
-		MongoDBKey,
-		RepoPathKey,
-		BdRepoKey,
-		PortKey,
-		SlackWebhookKey,
-		CopilotTokenKey,
-		GhTokenKey,
-		GithubTokenKey,
-		MaxRetriesKey,
-		ExecutionTaskPromptKey,
-		VerificationTaskPromptKey,
-	} {
+	for _, key := range envOverrideKeys {
 		if val, ok := lookupEnv(key); ok {
+			if fileValue, fileHasValue := jsonValues[key]; fileHasValue && strings.TrimSpace(fileValue) != "" {
+				logEnvOverrideCollision(logger, key, strings.TrimSpace(fileValue), val)
+			}
 			values[key] = val
 		}
 	}
@@ -244,6 +255,29 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func logEnvOverrideCollision(logger *zap.Logger, key, fileValue, envValue string) {
+	if isSecretKey(key) {
+		logger.Warn(
+			"environment overrides config file value",
+			zap.String("key", key),
+			zap.Bool("env_overrides_file", true),
+		)
+		return
+	}
+
+	logger.Warn(
+		"environment overrides config file value",
+		zap.String("key", key),
+		zap.String("file_value", fileValue),
+		zap.String("env_value", envValue),
+	)
+}
+
+func isSecretKey(key string) bool {
+	_, ok := secretKeys[key]
+	return ok
 }
 
 type mapConfig struct {

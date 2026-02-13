@@ -40,6 +40,11 @@ client.
 - The wrapper starts `new Codex().startThread({ workingDirectory: <repo-path> })`.
 - It runs `runStreamed(<prompt>)` and forwards each event unchanged.
 - Any fatal setup/auth/stream error is emitted to `stderr` and exits non-zero.
+- CLI resolution for the SDK backend:
+  - Uses `YARALPHO_CODEX_CLI_PATH` if set.
+  - Else uses `CODEX_CLI_PATH` if set.
+  - Else resolves `codex` from `PATH`.
+  - If none are available, SDK falls back to packaged binaries (may fail in standalone builds).
 
 ## Local verification
 
@@ -63,7 +68,7 @@ This script performs:
 
 1. `npm run build` to refresh `dist/main.js`
 2. `mkdir -p bin` to ensure a stable output directory
-3. `bun build --compile dist/main.js --outfile bin/codex-wrapper-linux-x64`
+3. `bun build --compile src/main.ts --outfile bin/codex-wrapper-linux-x64`
 
 Expected artifact:
 

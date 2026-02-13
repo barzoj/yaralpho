@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+
 type ParsedArgs = {
   help: boolean;
   repoPath: string;
@@ -16,17 +18,16 @@ type CodexInstance = {
   startThread: (options: { workingDirectory: string }) => CodexThread;
 };
 
-type CodexModule = {
-  Codex: new () => CodexInstance;
+type CodexOptions = {
+  codexPathOverride?: string;
 };
 
-const dynamicImport = new Function(
-  "specifier",
-  "return import(specifier);",
-) as (specifier: string) => Promise<unknown>;
+type CodexModule = {
+  Codex: new (options?: CodexOptions) => CodexInstance;
+};
 
 async function loadCodexModule(): Promise<CodexModule> {
-  const module = await dynamicImport("@openai/codex-sdk");
+  const module = await import("@openai/codex-sdk");
   if (!module || typeof module !== "object" || !("Codex" in module)) {
     throw new Error("failed to load @openai/codex-sdk");
   }
@@ -98,7 +99,15 @@ function writeEventAsNDJSON(event: unknown): void {
 async function streamCodex(args: ParsedArgs): Promise<void> {
   const codexModule = await loadCodexModule();
   const { Codex } = codexModule;
-  const codex = new Codex();
+  const codexPathOverride = resolveCodexPathOverride();
+  if (!codexPathOverride) {
+    process.stderr.write(
+      "Warning: codex CLI not found on PATH and no YARALPHO_CODEX_CLI_PATH/CODEX_CLI_PATH set; relying on SDK packaged binaries.\n",
+    );
+  }
+  const codex = new Codex(
+    codexPathOverride ? { codexPathOverride } : undefined,
+  );
   const thread = codex.startThread({
     workingDirectory: args.repoPath,
   });
@@ -107,6 +116,38 @@ async function streamCodex(args: ParsedArgs): Promise<void> {
   for await (const event of events) {
     writeEventAsNDJSON(event);
   }
+}
+
+function resolveCodexPathOverride(): string | undefined {
+  const fromEnv = firstNonEmpty(
+    process.env.YARALPHO_CODEX_CLI_PATH,
+    process.env.CODEX_CLI_PATH,
+  );
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const lookup = spawnSync("sh", ["-lc", "command -v codex"], {
+    encoding: "utf8",
+  });
+  if (lookup.status === 0) {
+    const resolved = (lookup.stdout ?? "").trim();
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return undefined;
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = (value ?? "").trim();
+    if (trimmed !== "") {
+      return trimmed;
+    }
+  }
+  return undefined;
 }
 
 async function run(argv: string[]): Promise<number> {
