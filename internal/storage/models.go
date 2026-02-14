@@ -6,12 +6,28 @@ import "time"
 type BatchStatus string
 
 const (
-	BatchStatusCreated     BatchStatus = "created"
-	BatchStatusRunning     BatchStatus = "running"
-	BatchStatusIdle        BatchStatus = "idle"
+	// BatchStatusPending represents a batch that is created and awaiting scheduling.
+	BatchStatusPending BatchStatus = "pending"
+	BatchStatusCreated BatchStatus = "created"
+	BatchStatusRunning BatchStatus = "running"
+	BatchStatusIdle    BatchStatus = "idle"
+	// BatchStatusInProgress mirrors pending->in_progress transitions for repository-aware scheduling.
+	BatchStatusInProgress BatchStatus = "in_progress"
+	// BatchStatusPaused prevents new items from starting while allowing in-flight work to finish.
+	BatchStatusPaused      BatchStatus = "paused"
 	BatchStatusDone        BatchStatus = "done"
 	BatchStatusFailed      BatchStatus = "failed"
 	BatchStatusBlockedAuth BatchStatus = "blocked_auth"
+)
+
+// ItemStatus captures lifecycle states for a single batch item.
+type ItemStatus string
+
+const (
+	ItemStatusPending    ItemStatus = "pending"
+	ItemStatusInProgress ItemStatus = "in_progress"
+	ItemStatusDone       ItemStatus = "done"
+	ItemStatusFailed     ItemStatus = "failed"
 )
 
 // TaskRunStatus represents execution states for a single task run.

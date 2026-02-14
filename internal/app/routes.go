@@ -17,7 +17,7 @@ func (a *App) registerRoutes() {
 
 	a.router.HandleFunc("/health", a.healthHandler).Methods(http.MethodGet)
 
-	a.router.HandleFunc("/add", a.addHandler).Methods(http.MethodPost)
+	a.router.HandleFunc("/repository/{repoid}/add", a.addBatchHandler).Methods(http.MethodPost)
 	a.router.HandleFunc("/batches", a.listBatchesHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/batches/{id}", a.batchDetailHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/batches/{id}/progress", a.batchProgressHandler).Methods(http.MethodGet)

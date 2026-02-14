@@ -3,7 +3,7 @@ Composition root for the Ralph Runner service: builds dependencies, starts the c
 
 # Exposed Interfaces
 - Functions to construct the application given config and zap logger, wiring storage, queue, tracker, notifier, copilot client, and consumer.
-- HTTP server setup (gorilla/mux) with route registration for /add, /batches, /batches/{id}, /batches/{id}/progress, /runs, /runs/{id}.
+- HTTP server setup (gorilla/mux) with route registration for /repository/{repoid}/add, /batches, /batches/{id}, /batches/{id}/progress, /runs, /runs/{id}.
 
 # Notes for Agents
 - Configuration is env-first; honor optional config path flag from `cmd/main.go`.

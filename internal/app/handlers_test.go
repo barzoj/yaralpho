@@ -265,22 +265,37 @@ func newTestApp(t *testing.T, st *handlerTestStorage, q *handlerTestQueue) *App 
 
 // --- tests -------------------------------------------------------------------
 
-func TestHandlers_AddAndList(t *testing.T) {
+func TestBatchCreateUnderRepository(t *testing.T) {
 	st := newHandlerTestStorage()
 	q := &handlerTestQueue{}
+	repoID := "repo-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Test Repo", Path: "/tmp/repo"}
 	app := newTestApp(t, st, q)
 
-	req := httptest.NewRequest(http.MethodPost, "/add?items=T1,T2&session_name=test", bytes.NewBuffer(nil))
+	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add?items=T1,T2&session_name=test", bytes.NewBuffer(nil))
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Equal(t, http.StatusCreated, rec.Code)
 
-	var resp map[string]string
+	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	batchID := resp["batch_id"]
+	batchID, _ := resp["batch_id"].(string)
 	require.NotEmpty(t, batchID)
-	require.Len(t, q.items, 2)
+	require.Equal(t, "pending", resp["status"])
+	require.Equal(t, repoID, resp["repository_id"])
+	require.Len(t, q.items, 0) // no queue interaction
+
+	batch, ok := st.batches[batchID]
+	require.True(t, ok)
+	require.Equal(t, repoID, batch.RepositoryID)
+	require.Equal(t, storage.BatchStatusPending, batch.Status)
+	require.Equal(t, "test", batch.SessionName)
+	require.Len(t, batch.Items, 2)
+	for _, it := range batch.Items {
+		require.Equal(t, string(storage.ItemStatusPending), it.Status)
+		require.Equal(t, 0, it.Attempts)
+	}
 
 	// list batches
 	req = httptest.NewRequest(http.MethodGet, "/batches", nil)
@@ -291,6 +306,34 @@ func TestHandlers_AddAndList(t *testing.T) {
 	var listResp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listResp))
 	require.Equal(t, float64(1), listResp["count"])
+}
+
+func TestBatchCreateMissingRepository(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodPost, "/repository/missing/add?items=T1", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Empty(t, st.batches)
+}
+
+func TestBatchCreateNoItems(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	repoID := "repo-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Test Repo", Path: "/tmp/repo"}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, st.batches)
 }
 
 func TestHandlers_RunDetailEventCap(t *testing.T) {

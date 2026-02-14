@@ -118,6 +118,9 @@ func (c *Client) RepositoryHasActiveBatches(ctx context.Context, id string) (boo
 	filter := bson.M{
 		"repository_id": id,
 		"status": bson.M{"$in": []storage.BatchStatus{
+			storage.BatchStatusPending,
+			storage.BatchStatusInProgress,
+			storage.BatchStatusPaused,
 			storage.BatchStatusCreated,
 			storage.BatchStatusRunning,
 			storage.BatchStatusIdle,
