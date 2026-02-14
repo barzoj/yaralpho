@@ -522,24 +522,28 @@ func TestHandlers_ListRunsIncludesTaskRefAndEventCounts(t *testing.T) {
 	st := newHandlerTestStorage()
 	q := &handlerTestQueue{}
 	app := newTestApp(t, st, q)
+	st.repos["repo-1"] = storage.Repository{ID: "repo-1", Name: "Repo"}
 
 	now := time.Now().UTC()
 	run1 := storage.TaskRun{
-		ID:        "run-newer",
-		BatchID:   "batch-1",
-		TaskRef:   "task-1",
-		Status:    storage.TaskRunStatusSucceeded,
-		SessionID: "s1",
-		StartedAt: now,
+		ID:           "run-newer",
+		BatchID:      "batch-1",
+		RepositoryID: "repo-1",
+		TaskRef:      "task-1",
+		Status:       storage.TaskRunStatusSucceeded,
+		SessionID:    "s1",
+		StartedAt:    now,
 	}
 	run2 := storage.TaskRun{
-		ID:        "run-older",
-		BatchID:   "batch-1",
-		TaskRef:   "task-2",
-		Status:    storage.TaskRunStatusFailed,
-		SessionID: "s2",
-		StartedAt: now.Add(-time.Minute),
+		ID:           "run-older",
+		BatchID:      "batch-1",
+		RepositoryID: "repo-1",
+		TaskRef:      "task-2",
+		Status:       storage.TaskRunStatusFailed,
+		SessionID:    "s2",
+		StartedAt:    now.Add(-time.Minute),
 	}
+	st.batches["batch-1"] = storage.Batch{ID: "batch-1", RepositoryID: "repo-1", CreatedAt: now, UpdatedAt: now}
 	st.runs[run1.ID] = run1
 	st.runs[run2.ID] = run2
 	st.events["s1"] = []storage.SessionEvent{
@@ -550,7 +554,7 @@ func TestHandlers_ListRunsIncludesTaskRefAndEventCounts(t *testing.T) {
 		{RunID: "run-older", SessionID: "s2", Event: map[string]any{"n": 1}},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/runs?batch_id=batch-1&limit=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/repository/repo-1/batch/batch-1/runs?limit=2", nil)
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)

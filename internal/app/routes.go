@@ -27,7 +27,7 @@ func (a *App) registerRoutes() {
 	a.router.HandleFunc("/agent/{id}", a.getAgentHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/agent/{id}", a.updateAgentHandler).Methods(http.MethodPut)
 	a.router.HandleFunc("/agent/{id}", a.deleteAgentHandler).Methods(http.MethodDelete)
-	a.router.HandleFunc("/runs", a.listRunsHandler).Methods(http.MethodGet)
+	a.router.HandleFunc("/repository/{repoid}/batch/{batchid}/runs", a.listRunsHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}/events", a.runEventsHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}/events/live", a.runEventsLiveHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/runs/{id}", a.runDetailHandler).Methods(http.MethodGet)

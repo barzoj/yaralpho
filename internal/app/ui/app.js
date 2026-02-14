@@ -911,23 +911,26 @@
   }
 
   async function renderRuns(batchId) {
-    viewTitle.textContent = `Runs for ${batchId}`;
-    renderBreadcrumbs([
-      { label: "Batches", href: "/app" },
-      { label: batchId },
-    ]);
-    setStatus("Loading runs…", "loading");
-    clearContent();
+	viewTitle.textContent = `Runs for ${batchId}`;
+	renderBreadcrumbs([
+	  { label: "Batches", href: "/app" },
+	  { label: batchId },
+	]);
+	setStatus("Loading runs…", "loading");
+	clearContent();
 
     const actions = document.createElement("div");
     actions.className = "actions";
     actions.appendChild(createButtonLink("/app", "Back to batches"));
     contentEl.appendChild(actions);
 
-    try {
-      const data = await fetchJSON(
-        `/runs?batch_id=${encodeURIComponent(batchId)}&limit=${LIST_LIMIT}`
-      );
+	try {
+	  const repoId = await deriveRepositoryIdForBatch(batchId);
+	  const data = await fetchJSON(
+	    `/repository/${encodeURIComponent(
+	      repoId
+	    )}/batch/${encodeURIComponent(batchId)}/runs?limit=${LIST_LIMIT}`
+	  );
       const runs = data.runs || [];
       if (!runs.length) {
         contentEl.appendChild(emptyState("No runs for this batch."));
