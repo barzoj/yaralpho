@@ -23,6 +23,15 @@ func (c *Client) CreateTaskRun(ctx context.Context, run *storage.TaskRun) error 
 		run.StartedAt = time.Now().UTC()
 	}
 
+	// Backfill repository_id from batch when omitted to keep documents aligned
+	// with repository-scoped queries and indexes.
+	if run.RepositoryID == "" && run.BatchID != "" {
+		batch, err := c.GetBatch(ctx, run.BatchID)
+		if err == nil && batch != nil {
+			run.RepositoryID = batch.RepositoryID
+		}
+	}
+
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
 
@@ -45,7 +54,7 @@ func (c *Client) UpdateTaskRun(ctx context.Context, run *storage.TaskRun) error 
 
 	if run.RepositoryID == "" && run.BatchID != "" {
 		batch, err := c.GetBatch(ctx, run.BatchID)
-		if err == nil {
+		if err == nil && batch != nil {
 			run.RepositoryID = batch.RepositoryID
 		}
 	}

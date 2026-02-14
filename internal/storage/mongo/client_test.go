@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -37,6 +38,23 @@ func TestMongoStorageCRUD(t *testing.T) {
 		_ = client.Close(ctx)
 	}()
 
+	// Repositories
+	repo := &storage.Repository{ID: "repo-1", Name: "Repo One", Path: "/tmp/repo1"}
+	if err := client.CreateRepository(ctx, repo); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	gotRepo, err := client.GetRepository(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if gotRepo.Path != repo.Path {
+		t.Fatalf("repository path mismatch: %s vs %s", gotRepo.Path, repo.Path)
+	}
+	// uniqueness on name
+	if err := client.CreateRepository(ctx, &storage.Repository{ID: "repo-dup", Name: repo.Name, Path: "/tmp/other"}); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("expected conflict on duplicate repo name, got %v", err)
+	}
+
 	now := time.Now().UTC()
 	batch := &storage.Batch{
 		ID:           "batch-1",
@@ -57,6 +75,9 @@ func TestMongoStorageCRUD(t *testing.T) {
 	if fetchedBatch.Status != storage.BatchStatusPending {
 		t.Fatalf("unexpected batch status: %s", fetchedBatch.Status)
 	}
+	if len(fetchedBatch.Items) != 1 || fetchedBatch.Items[0].Attempts != 0 {
+		t.Fatalf("unexpected batch items: %+v", fetchedBatch.Items)
+	}
 
 	batch.Status = storage.BatchStatusInProgress
 	if err := client.UpdateBatch(ctx, batch); err != nil {
@@ -71,6 +92,19 @@ func TestMongoStorageCRUD(t *testing.T) {
 		t.Fatalf("expected batches, got none")
 	}
 
+	// Agents
+	agent := &storage.Agent{ID: "agent-1", Name: "Agent One", Runtime: "codex"}
+	if err := client.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	if err := client.CreateAgent(ctx, &storage.Agent{ID: "agent-dup", Name: agent.Name, Runtime: "codex"}); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("expected conflict on duplicate agent name, got %v", err)
+	}
+	agents, err := client.ListAgents(ctx)
+	if err != nil || len(agents) == 0 {
+		t.Fatalf("ListAgents: %v len=%d", err, len(agents))
+	}
+
 	run := &storage.TaskRun{
 		ID:        "run-1",
 		BatchID:   batch.ID,
@@ -81,6 +115,9 @@ func TestMongoStorageCRUD(t *testing.T) {
 	}
 	if err := client.CreateTaskRun(ctx, run); err != nil {
 		t.Fatalf("CreateTaskRun: %v", err)
+	}
+	if run.RepositoryID == "" {
+		t.Fatalf("expected repository_id backfilled on create")
 	}
 
 	finished := now.Add(time.Minute)

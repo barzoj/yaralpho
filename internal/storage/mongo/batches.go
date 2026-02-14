@@ -52,6 +52,15 @@ func (c *Client) UpdateBatch(ctx context.Context, batch *storage.Batch) error {
 		return fmt.Errorf("batch is nil")
 	}
 
+	for i := range batch.Items {
+		if batch.Items[i].Status == "" {
+			batch.Items[i].Status = storage.ItemStatusPending
+		}
+		if batch.Items[i].Attempts < 0 {
+			batch.Items[i].Attempts = 0
+		}
+	}
+
 	batch.UpdatedAt = time.Now().UTC()
 
 	ctx, cancel := c.withTimeout(ctx)

@@ -127,6 +127,7 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 			models: []mongo.IndexModel{
 				{Keys: bson.D{{Key: "batch_id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "repository_id", Value: 1}}},
+				{Keys: bson.D{{Key: "repository_id", Value: 1}, {Key: "status", Value: 1}}},
 				{Keys: bson.D{{Key: "repository_id", Value: 1}, {Key: "created_at", Value: -1}}},
 			},
 		},
