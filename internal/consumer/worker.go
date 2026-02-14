@@ -17,9 +17,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// WorkItem represents a single unit of work selected by the scheduler.
-// It replaces the legacy queue payloads and is invoked directly by the
-// scheduler rather than being dequeued from an in-memory queue.
+// WorkItem represents a single unit of work selected by the scheduler and
+// executed directly without an intermediary buffer.
 type WorkItem struct {
 	BatchID string `json:"batch_id"`
 	TaskRef string `json:"task_ref"`
@@ -72,8 +71,8 @@ func NewWorker(tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt not
 	}
 }
 
-// Process executes a single work item selected by the scheduler.
-// It replaces the legacy Run+Dequeue loop.
+// Process executes a single work item selected by the scheduler using the
+// direct execution path.
 func (w *Worker) Process(ctx context.Context, item WorkItem) error {
 	item.BatchID = strings.TrimSpace(item.BatchID)
 	item.TaskRef = strings.TrimSpace(item.TaskRef)
