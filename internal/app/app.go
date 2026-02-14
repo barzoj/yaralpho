@@ -303,3 +303,7 @@ func (a *App) Router() *mux.Router {
 func (a *App) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+func (a *App) versionHandler(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"version": Version})
+}

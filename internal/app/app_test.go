@@ -181,6 +181,37 @@ func TestHealthRoute(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"ok"`)
 }
 
+func TestVersionRoute(t *testing.T) {
+	originalVersion := Version
+	Version = "abc123"
+	t.Cleanup(func() { Version = originalVersion })
+
+	cfg := fakeConfig{
+		config.PortKey:     "0",
+		config.MongoURIKey: "mongodb://example",
+		config.MongoDBKey:  "db",
+		config.RepoPathKey: "/repo",
+		config.BdRepoKey:   "/repo",
+	}
+
+	st := &fakeStorage{}
+	q := queue.NewMemoryQueue(zap.NewNop())
+	tr := &fakeTracker{}
+	nt := fakeNotifier{}
+	cp := fakeCopilot{}
+	cons := &fakeConsumer{}
+
+	a, err := New(zap.NewNop(), cfg, st, q, tr, nt, cp, cons)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	rec := httptest.NewRecorder()
+	a.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"version":"abc123"`)
+}
+
 func TestRunStartsConsumerOnce(t *testing.T) {
 	cfg := fakeConfig{
 		config.PortKey:     "0",
