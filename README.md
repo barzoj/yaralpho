@@ -74,7 +74,6 @@ The config loader is environment-first with an optional JSON fallback:
 - JSON is loaded from `config.json` by default; override the path with the `RALPH_CONFIG` env var (or pass a path to the loader).
 - Blank/whitespace values are ignored.
 - On startup the loader panics if any required keys are missing.
-- Token precedence: `COPILOT_GITHUB_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN`.
 
 | Key | Required? | Default | Description |
 | --- | --- | --- | --- |
@@ -87,14 +86,11 @@ The config loader is environment-first with an optional JSON fallback:
 | `YARALPHO_MAX_RETRIES` | no | `5` | Max attempts per batch item before the batch is marked `failed`. |
 | `YARALPHO_SCHEDULER_INTERVAL` | no | `10s` | Interval between scheduler ticks that claim the next eligible batch item. |
 | `YARALPHO_RESTART_WAIT_TIMEOUT` | no | `30s` | Maximum time `/restart?wait=true` will block while draining active runs. |
-| `COPILOT_GITHUB_TOKEN` | yes* | — | Primary token for GitHub Copilot SDK. |
-| `GH_TOKEN` | no* | — | Fallback token if `COPILOT_GITHUB_TOKEN` is unset. |
-| `GITHUB_TOKEN` | no* | — | Secondary fallback if both above are unset. |
 | `YARALPHO_EXECUTION_TASK_PROMPT` | no | built-in | Prompt template for execution agents (used by worker). |
 | `YARALPHO_VERIFICATION_TASK_PROMPT` | no | built-in | Prompt template for verification agents. |
 | `RALPH_CONFIG` | no | `config.json` | Path to JSON config file (env still wins). |
 
-\*At least one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` must be set; the first non-empty in that order is used. Missing required keys cause a panic before the server starts.
+GitHub Copilot still requires an access token, but the SDK reads it directly from `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_TOKEN`) without going through the config loader.
 
 ### JSON example (fallback file)
 
@@ -105,9 +101,6 @@ The config loader is environment-first with an optional JSON fallback:
   "YARALPHO_REPO_PATH": "/abs/path/to/repo",
   "YARALPHO_BD_REPO": "/abs/path/to/bd/repo",
   "YARALPHO_PORT": "8080",
-  "COPILOT_GITHUB_TOKEN": "ghp_REDACTED_token",
-  "GH_TOKEN": "",
-  "GITHUB_TOKEN": "",
   "YARALPHO_SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T000/B000/REDACTED",
   "YARALPHO_MAX_RETRIES": "5"
 }

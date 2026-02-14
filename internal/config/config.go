@@ -25,9 +25,6 @@ const (
 	BdRepoKey                 = "YARALPHO_BD_REPO"
 	PortKey                   = "YARALPHO_PORT"
 	SlackWebhookKey           = "YARALPHO_SLACK_WEBHOOK_URL"
-	CopilotTokenKey           = "COPILOT_GITHUB_TOKEN"
-	GhTokenKey                = "GH_TOKEN"
-	GithubTokenKey            = "GITHUB_TOKEN"
 	MaxRetriesKey             = "YARALPHO_MAX_RETRIES"
 	SchedulerIntervalKey      = "YARALPHO_SCHEDULER_INTERVAL"
 	RestartWaitTimeoutKey     = "YARALPHO_RESTART_WAIT_TIMEOUT"
@@ -96,7 +93,6 @@ var requiredKeys = []string{
 	RepoPathKey,
 	BdRepoKey,
 	PortKey,
-	CopilotTokenKey,
 }
 
 var envOverrideKeys = []string{
@@ -106,9 +102,6 @@ var envOverrideKeys = []string{
 	BdRepoKey,
 	PortKey,
 	SlackWebhookKey,
-	CopilotTokenKey,
-	GhTokenKey,
-	GithubTokenKey,
 	MaxRetriesKey,
 	SchedulerIntervalKey,
 	RestartWaitTimeoutKey,
@@ -117,12 +110,10 @@ var envOverrideKeys = []string{
 }
 
 var secretKeys = map[string]struct{}{
-	CopilotTokenKey: {},
-	GhTokenKey:      {},
-	GithubTokenKey:  {},
+	SlackWebhookKey: {},
 }
 
-// LoggableKeys lists configuration keys safe to emit in logs. Token values are
+// LoggableKeys lists configuration keys safe to emit in logs. Secrets are
 // intentionally excluded to avoid leaking credentials.
 func LoggableKeys() []string {
 	return []string{
@@ -131,7 +122,6 @@ func LoggableKeys() []string {
 		RepoPathKey,
 		BdRepoKey,
 		PortKey,
-		SlackWebhookKey,
 		MaxRetriesKey,
 		SchedulerIntervalKey,
 		RestartWaitTimeoutKey,
@@ -187,13 +177,6 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 	if strings.TrimSpace(values[PortKey]) == "" {
 		values[PortKey] = "8080"
 	}
-
-	// Token precedence: COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN
-	values[CopilotTokenKey] = firstNonEmpty(
-		values[CopilotTokenKey],
-		values[GhTokenKey],
-		values[GithubTokenKey],
-	)
 
 	if strings.TrimSpace(values[MaxRetriesKey]) == "" {
 		values[MaxRetriesKey] = defaultMaxRetries
@@ -260,15 +243,6 @@ func lookupEnv(key string) (string, bool) {
 		return "", false
 	}
 	return trimmed, true
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func logEnvOverrideCollision(logger *zap.Logger, key, fileValue, envValue string) {

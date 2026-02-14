@@ -8,8 +8,5 @@
   "YARALPHO_EXECUTION_TASK_PROMPT": "Custom execution task prompt (optional)",
   "YARALPHO_VERIFICATION_TASK_PROMPT": "Custom verification task prompt (optional)",
   "YARALPHO_CODEX_WRAPPER_PATH": "",
-  "COPILOT_GITHUB_TOKEN": "ghp_REDACTED_token",
-  "GH_TOKEN": "",
-  "GITHUB_TOKEN": "",
   "YARALPHO_SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/XXX/YYY/ZZZ"
 }

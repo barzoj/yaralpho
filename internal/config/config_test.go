@@ -21,7 +21,6 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
         "YARALPHO_REPO_PATH": "/json/repo",
         "YARALPHO_BD_REPO": "json-bd",
         "YARALPHO_PORT": "7000",
-        "GITHUB_TOKEN": "json-gh",
         "YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json",
         "YARALPHO_MAX_RETRIES": "3",
         "YARALPHO_SCHEDULER_INTERVAL": "99s",
@@ -34,7 +33,6 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	t.Setenv(ConfigPathOverride, file.Name())
 	t.Setenv(MongoURIKey, "env-uri")
 	t.Setenv(PortKey, "9090")
-	t.Setenv(GhTokenKey, "env-gh-token")
 	t.Setenv(SlackWebhookKey, "https://example.com/env")
 	t.Setenv(MaxRetriesKey, "7")
 	t.Setenv(SchedulerIntervalKey, "15s")
@@ -52,10 +50,6 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	port, err := cfg.Get(PortKey)
 	require.NoError(t, err)
 	require.Equal(t, "9090", port)
-
-	token, err := cfg.Get(CopilotTokenKey)
-	require.NoError(t, err)
-	require.Equal(t, "env-gh-token", token)
 
 	slack, err := cfg.Get(SlackWebhookKey)
 	require.NoError(t, err)
@@ -95,7 +89,6 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	t.Setenv(MongoDBKey, "db")
 	t.Setenv(RepoPathKey, "/repo")
 	t.Setenv(BdRepoKey, "bd/repo")
-	t.Setenv(CopilotTokenKey, "token")
 	t.Setenv(PortKey, "")
 	t.Setenv(SlackWebhookKey, "")
 	t.Setenv(MaxRetriesKey, "")
@@ -149,7 +142,7 @@ func TestLoadWithPath_WarnsOnEnvOverride(t *testing.T) {
 		"YARALPHO_REPO_PATH": "/json/repo",
 		"YARALPHO_BD_REPO": "json-bd",
 		"YARALPHO_PORT": "8080",
-		"COPILOT_GITHUB_TOKEN": "json-token"
+		"YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json"
 	}`)
 	require.NoError(t, os.WriteFile(file.Name(), content, 0o644))
 
@@ -202,11 +195,11 @@ func TestLoadWithPath_SecretOverrideDoesNotLogRawValues(t *testing.T) {
 		"YARALPHO_REPO_PATH": "/json/repo",
 		"YARALPHO_BD_REPO": "json-bd",
 		"YARALPHO_PORT": "8080",
-		"GITHUB_TOKEN": "json-secret-token"
+		"YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json-secret"
 	}`)
 	require.NoError(t, os.WriteFile(file.Name(), content, 0o644))
 
-	t.Setenv(GithubTokenKey, "env-secret-token")
+	t.Setenv(SlackWebhookKey, "https://example.com/env-secret")
 
 	core, recorded := observer.New(zap.WarnLevel)
 	logger := zap.New(core)
@@ -216,12 +209,12 @@ func TestLoadWithPath_SecretOverrideDoesNotLogRawValues(t *testing.T) {
 	entries := recorded.All()
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()
-	require.Equal(t, GithubTokenKey, fields["key"])
+	require.Equal(t, SlackWebhookKey, fields["key"])
 	require.Equal(t, true, fields["env_overrides_file"])
 	_, hasFileValue := fields["file_value"]
 	_, hasEnvValue := fields["env_value"]
 	require.False(t, hasFileValue)
 	require.False(t, hasEnvValue)
-	require.NotContains(t, entries[0].Message, "json-secret-token")
-	require.NotContains(t, entries[0].Message, "env-secret-token")
+	require.NotContains(t, entries[0].Message, "json-secret")
+	require.NotContains(t, entries[0].Message, "env-secret")
 }
