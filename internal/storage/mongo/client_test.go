@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/barzoj/yaralpho/internal/storage"
+	"go.mongodb.org/mongo-driver/bson"
+	mongodriver "go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 )
 
@@ -179,5 +182,60 @@ func TestMongoStorageCRUD(t *testing.T) {
 	}
 	if progress.Total != 1 || progress.Succeeded != 1 {
 		t.Fatalf("unexpected progress: %+v", progress)
+	}
+}
+
+func TestEnsureIndexesRecoversFromSpecConflicts(t *testing.T) {
+	uri, db := mongoConfigOrSkip(t)
+	db = db + "_index_conflict"
+
+	ctx := context.Background()
+	driverClient, err := mongodriver.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatalf("connect mongo: %v", err)
+	}
+	defer func() { _ = driverClient.Disconnect(ctx) }()
+
+	// Start from a clean slate.
+	if err := driverClient.Database(db).Drop(ctx); err != nil {
+		t.Fatalf("drop test db: %v", err)
+	}
+
+	// Seed a non-unique index with the same name to mirror pre-upgrade state.
+	batches := driverClient.Database(db).Collection(batchesCollection)
+	if _, err := batches.Indexes().CreateOne(ctx, mongodriver.IndexModel{Keys: bson.D{{Key: "batch_id", Value: 1}}}); err != nil {
+		t.Fatalf("seed index: %v", err)
+	}
+
+	client, err := New(ctx, uri, db, zap.NewExample())
+	if err != nil {
+		t.Fatalf("New with conflicting index: %v", err)
+	}
+	defer func() {
+		_ = client.db.Drop(ctx)
+		_ = client.Close(ctx)
+	}()
+
+	cursor, err := client.batches.Indexes().List(ctx)
+	if err != nil {
+		t.Fatalf("list indexes: %v", err)
+	}
+	var indexes []bson.M
+	if err := cursor.All(ctx, &indexes); err != nil {
+		t.Fatalf("read indexes: %v", err)
+	}
+
+	var batchIndex bson.M
+	for _, idx := range indexes {
+		if name, ok := idx["name"].(string); ok && name == "batch_id_1" {
+			batchIndex = idx
+			break
+		}
+	}
+	if batchIndex == nil {
+		t.Fatalf("batch_id_1 index not found")
+	}
+	if unique, ok := batchIndex["unique"].(bool); !ok || !unique {
+		t.Fatalf("expected batch_id_1 unique index, got %v", batchIndex["unique"])
 	}
 }

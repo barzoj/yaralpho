@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -93,7 +94,76 @@ func optionsFindByCreatedDesc() *options.FindOptions {
 	return options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}})
 }
 
-// ensureIndexes creates non-unique indexes needed by the storage interface.
+// normalizeIndexModel ensures every index has a stable, explicit name so we can
+// manage it idempotently.
+func normalizeIndexModel(model mongo.IndexModel) (mongo.IndexModel, error) {
+	name, err := indexModelName(model)
+	if err != nil {
+		return mongo.IndexModel{}, err
+	}
+
+	if model.Options == nil {
+		model.Options = options.Index()
+	}
+	model.Options.SetName(name)
+	return model, nil
+}
+
+func indexModelName(model mongo.IndexModel) (string, error) {
+	if model.Options != nil && model.Options.Name != nil && *model.Options.Name != "" {
+		return *model.Options.Name, nil
+	}
+
+	keysDoc, ok := model.Keys.(bson.D)
+	if !ok {
+		return "", fmt.Errorf("index keys must be bson.D to derive name: %T", model.Keys)
+	}
+	if len(keysDoc) == 0 {
+		return "", errors.New("index keys cannot be empty")
+	}
+
+	parts := make([]string, len(keysDoc))
+	for i, kv := range keysDoc {
+		parts[i] = fmt.Sprintf("%s_%v", kv.Key, kv.Value)
+	}
+	return strings.Join(parts, "_"), nil
+}
+
+func (c *Client) createIndexes(ctx context.Context, collectionName string, coll *mongo.Collection, models []mongo.IndexModel) error {
+	_, err := coll.Indexes().CreateMany(ctx, models)
+	if err == nil {
+		return nil
+	}
+
+	var cmdErr mongo.CommandError
+	if errors.As(err, &cmdErr) && cmdErr.Name == "IndexKeySpecsConflict" {
+		for _, model := range models {
+			if model.Options == nil || model.Options.Name == nil || *model.Options.Name == "" {
+				continue
+			}
+			name := *model.Options.Name
+			if _, dropErr := coll.Indexes().DropOne(ctx, name); dropErr != nil {
+				var dropCmdErr mongo.CommandError
+				if errors.As(dropErr, &dropCmdErr) && dropCmdErr.Name == "IndexNotFound" {
+					continue
+				}
+				return fmt.Errorf("drop conflicting index %s on %s: %w", name, collectionName, dropErr)
+			}
+			c.logger.Warn("dropped conflicting index", zap.String("collection", collectionName), zap.String("index", name))
+		}
+
+		_, err = coll.Indexes().CreateMany(ctx, models)
+	}
+
+	if err != nil {
+		c.logger.Error("create indexes", zap.String("collection", collectionName), zap.Error(err))
+		return fmt.Errorf("create indexes for %s: %w", collectionName, err)
+	}
+
+	return nil
+}
+
+// ensureIndexes creates required indexes needed by the storage interface.
 func (c *Client) ensureIndexes(ctx context.Context) error {
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
@@ -161,10 +231,17 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 			continue
 		}
 
-		_, err := def.coll.Indexes().CreateMany(ctx, def.models)
-		if err != nil {
-			c.logger.Error("create indexes", zap.String("collection", def.name), zap.Error(err))
-			return fmt.Errorf("create indexes for %s: %w", def.name, err)
+		models := make([]mongo.IndexModel, 0, len(def.models))
+		for _, model := range def.models {
+			normalized, err := normalizeIndexModel(model)
+			if err != nil {
+				return fmt.Errorf("normalize index for %s: %w", def.name, err)
+			}
+			models = append(models, normalized)
+		}
+
+		if err := c.createIndexes(ctx, def.name, def.coll, models); err != nil {
+			return err
 		}
 	}
 
