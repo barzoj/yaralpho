@@ -1,6 +1,6 @@
 # Repository-aware scheduler
 
-This document summarizes the current scheduling model, data shapes, and HTTP surface for repository-scoped batch execution.
+This document summarizes the current scheduling model, data shapes, and HTTP surface for repository-scoped batch execution. The in-memory queue used by the original runner has been removed; scheduler ticks dispatch work directly to the consumer worker.
 
 ## Purpose
 
