@@ -85,6 +85,8 @@ The config loader is environment-first with an optional JSON fallback:
 | `YARALPHO_PORT` | no | `8080` | HTTP listen port. |
 | `YARALPHO_SLACK_WEBHOOK_URL` | no | — | Slack webhook for notifications (noop when unset). |
 | `YARALPHO_MAX_RETRIES` | no | `5` | Max attempts per batch item before the batch is marked `failed`. |
+| `YARALPHO_SCHEDULER_INTERVAL` | no | `10s` | Interval between scheduler ticks that claim the next eligible batch item. |
+| `YARALPHO_RESTART_WAIT_TIMEOUT` | no | `30s` | Maximum time `/restart?wait=true` will block while draining active runs. |
 | `COPILOT_GITHUB_TOKEN` | yes* | — | Primary token for GitHub Copilot SDK. |
 | `GH_TOKEN` | no* | — | Fallback token if `COPILOT_GITHUB_TOKEN` is unset. |
 | `GITHUB_TOKEN` | no* | — | Secondary fallback if both above are unset. |
@@ -120,6 +122,14 @@ Base URL defaults to `http://localhost:8080`.
 ### System
 - `GET /health` – liveness check.
 - `GET /version` – build identifier (set via `-ldflags -X ...Version`).
+- `POST /restart?wait=true|false` – puts the scheduler into draining mode. `wait=true` blocks (up to `YARALPHO_RESTART_WAIT_TIMEOUT`) until all active runs finish; otherwise returns `202 Accepted` immediately with the active run count.
+
+### Repositories
+- `POST /repository` – create a repository. Body: `{ "name": "repo-1", "path": "/abs/path" }` (path must be absolute). 409 on name/path conflict.
+- `GET /repository` – list repositories.
+- `GET /repository/{id}` – repository detail.
+- `PUT /repository/{id}` – update name/path (absolute path required). 409 on duplicate.
+- `DELETE /repository/{id}` – remove an idle repository (409 if any active batches exist).
 
 ### Agents
 - `POST /agent` – create an agent. Body: `{ "name": "worker-1", "runtime": "codex|copilot" }`. Sets status to `idle`.
@@ -131,21 +141,52 @@ Base URL defaults to `http://localhost:8080`.
 ### Batches (repository-scoped)
 - `POST /repository/{repoid}/add` – create a pending batch under an existing repository from JSON body `{ "items": ["ISSUE-1","ISSUE-2"], "session_name": "label" }`. Returns `batch_id`, `status`, `repository_id`.
 - `GET /batches?limit=50` – list recent batches (global view).
+- `GET /repository/{repoid}/batches?status=pending|in_progress|paused|done|failed&limit=50` – batches scoped to a repository with optional status filter; defaults to `pending|in_progress|paused|done|failed`.
 - `GET /batches/{id}` – batch detail with embedded runs.
 - `GET /batches/{id}/progress` – counts of pending/running/succeeded/failed/stopped for a batch.
+- `PUT /repository/{repoid}/batch/{batchid}/pause` – mark a batch paused (skips new items; in-flight work completes). 409 if done/failed/already paused.
+- `PUT /repository/{repoid}/batch/{batchid}/resume` – return a paused batch to `pending` so the scheduler can pick it up again.
 - `PUT /repository/{repoid}/batch/{batchid}/restart` – reset the failed item in a failed batch to `pending`, `attempts=0`. Returns `409` if the batch is not failed or `404` if the repo/batch mismatch.
 
 ### Runs
-- `GET /repository/{repoid}/batch/{batchid}/runs?limit=50` – runs for a batch scoped to its repository.
-- `GET /runs/{id}` – run detail including `repository_id` and events (capped by `event_limit`, defaults apply in handler).
-- `GET /runs/{id}/events?limit=100` – paged list of session events for a run.
+- `GET /repository/{repoid}/batch/{batchid}/runs?limit=50` – runs for a batch scoped to its repository (no global `/runs` list).
+- `GET /runs/{id}?event_limit=10000` – run detail plus capped events slice; `event_limit` caps returned events (default `10000`, max `100000`).
+- `GET /runs/{id}/events?limit=10000` – paged list of session events for a run (default `10000`, max `100000`); response includes `events_truncated` and `event_limit_used`.
 - `GET /runs/{id}/events/live?last_ingested=<rfc3339>` – WebSocket stream of session events with heartbeats. Optional `last_ingested` resumes after a known cursor.
 
 Notes:
-- There is no global `/runs` list anymore; runs are accessed via batch-scoped and detail endpoints.
-- Repository records must already exist in MongoDB; HTTP CRUD for repositories is not exposed yet.
-- Pause/resume statuses exist but HTTP endpoints are not yet wired.
+- There is no global `/runs` list; use batch-scoped runs + run detail.
+- Repository CRUD is exposed; repository paths must be absolute and deletion is blocked while batches are active.
+- Pause/resume endpoints are available; paused batches skip new items but allow in-flight work to finish.
+- `/restart?wait=true` drains the scheduler for deploy/CI workflows; caller blocks until idle or `YARALPHO_RESTART_WAIT_TIMEOUT` elapses.
 - The legacy "epic" concept has been removed; `parent_ref` in runs is only populated when a tracker indicates an epic but no special API surface remains.
+
+### Quickstart (curl)
+
+```bash
+# 1) Create a repository (absolute path required)
+curl -s -X POST http://localhost:8080/repository \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"demo","path":"/abs/path/to/repo"}' | tee /tmp/repo.json
+
+# 2) Add a batch under that repository
+repo_id=$(jq -r '.repository_id' /tmp/repo.json)
+curl -s -X POST http://localhost:8080/repository/$repo_id/add \
+  -H 'Content-Type: application/json' \
+  -d '{"items":["ISSUE-1","ISSUE-2"],"session_name":"demo-run"}' | tee /tmp/batch.json
+
+# 3) Watch progress and runs
+batch_id=$(jq -r '.batch_id' /tmp/batch.json)
+curl -s "http://localhost:8080/batches/$batch_id/progress"
+curl -s "http://localhost:8080/repository/$repo_id/batch/$batch_id/runs?limit=50"
+
+# 4) Pause/resume if needed
+curl -s -X PUT "http://localhost:8080/repository/$repo_id/batch/$batch_id/pause"
+curl -s -X PUT "http://localhost:8080/repository/$repo_id/batch/$batch_id/resume"
+
+# 5) CI-safe drain before restart/deploy (blocks until idle or timeout)
+curl -s -X POST "http://localhost:8080/restart?wait=true"
+```
 
 ## App UI (/app)
 
