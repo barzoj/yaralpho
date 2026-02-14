@@ -12,7 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultRestartWaitTimeout = 10 * 60 * time.Second
+// defaultRestartWaitTimeout matches the config package default (30s) to keep
+// restart draining waits predictable in tests and production.
+const defaultRestartWaitTimeout = 30 * time.Second
 
 // restartHandler sets the scheduler into draining mode. When wait=true, the
 // request blocks until all active runs finish; otherwise it returns 202
