@@ -28,6 +28,15 @@ func (c *Client) CreateBatch(ctx context.Context, batch *storage.Batch) error {
 		batch.Status = storage.BatchStatusPending
 	}
 
+	for i := range batch.Items {
+		if batch.Items[i].Status == "" {
+			batch.Items[i].Status = storage.ItemStatusPending
+		}
+		if batch.Items[i].Attempts < 0 {
+			batch.Items[i].Attempts = 0
+		}
+	}
+
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()
 

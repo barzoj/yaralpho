@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
@@ -135,7 +134,7 @@ func (t taggedCopilot) StartSession(ctx context.Context, prompt, repoPath string
 }
 
 func TestNewValidatesDependencies(t *testing.T) {
-	_, err := New(nil, nil, nil, nil, nil, nil, nil, nil)
+	_, err := New(nil, nil, nil, nil, nil, nil)
 	require.Error(t, err)
 }
 

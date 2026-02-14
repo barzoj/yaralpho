@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,7 +20,18 @@ import (
 	"go.uber.org/zap"
 )
 
+func skipIfNoTCP(t *testing.T) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("tcp listen not permitted in sandbox: %v", err)
+	}
+	_ = l.Close()
+}
+
 func TestRunEventsLiveHandlerRejectsInvalidCursor(t *testing.T) {
+	skipIfNoTCP(t)
+
 	st := newHandlerTestStorage()
 	app := newTestApp(t, st)
 	app.logger = zap.NewExample()
@@ -41,6 +53,8 @@ func TestRunEventsLiveHandlerRejectsInvalidCursor(t *testing.T) {
 }
 
 func TestRunEventsLiveHandlerRejectsFutureCursor(t *testing.T) {
+	skipIfNoTCP(t)
+
 	st := newHandlerTestStorage()
 	app := newTestApp(t, st)
 	app.logger = zap.NewExample()
@@ -63,6 +77,8 @@ func TestRunEventsLiveHandlerRejectsFutureCursor(t *testing.T) {
 }
 
 func TestRunEventsLiveHandlerStreamsEvents(t *testing.T) {
+	skipIfNoTCP(t)
+
 	st := newHandlerTestStorage()
 	app := newTestApp(t, st)
 
@@ -104,6 +120,8 @@ func TestRunEventsLiveHandlerStreamsEvents(t *testing.T) {
 }
 
 func TestRunEventsLiveHandlerBackfillsFromCursor(t *testing.T) {
+	skipIfNoTCP(t)
+
 	st := newHandlerTestStorage()
 	app := newTestApp(t, st)
 
@@ -191,6 +209,8 @@ func TestRunEventsLiveHandlerBackfillsFromCursor(t *testing.T) {
 }
 
 func TestRunEventsLiveHandlerClosesOnSubscribeError(t *testing.T) {
+	skipIfNoTCP(t)
+
 	st := newHandlerTestStorage()
 	app := newTestApp(t, st)
 
@@ -227,6 +247,8 @@ func TestRunEventsLiveHandlerClosesOnSubscribeError(t *testing.T) {
 }
 
 func TestRunEventsLiveHandlerClosesOnHeartbeatTimeout(t *testing.T) {
+	skipIfNoTCP(t)
+
 	oldReadTimeout := wsReadTimeout
 	oldHeartbeat := wsHeartbeatInterval
 	wsReadTimeout = 100 * time.Millisecond
@@ -275,6 +297,8 @@ func TestRunEventsLiveHandlerClosesOnHeartbeatTimeout(t *testing.T) {
 }
 
 func TestRunEventsLiveHandlerCleansUpOnWriteFailure(t *testing.T) {
+	skipIfNoTCP(t)
+
 	oldWriteJSON := wsWriteJSON
 	wsWriteJSON = func(*websocket.Conn, any) error {
 		return errors.New("forced write failure")

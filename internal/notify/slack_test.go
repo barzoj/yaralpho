@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,15 @@ import (
 )
 
 type stubConfig map[string]string
+
+func skipIfNoTCP(t *testing.T) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("tcp listen not permitted in sandbox: %v", err)
+	}
+	_ = l.Close()
+}
 
 func (c stubConfig) Get(key string) (string, error) {
 	val, ok := c[key]
@@ -33,6 +43,8 @@ func TestNewSlackNoWebhookReturnsNoop(t *testing.T) {
 }
 
 func TestPostPayloadAndStatus(t *testing.T) {
+	skipIfNoTCP(t)
+
 	var body string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := make([]byte, r.ContentLength)
@@ -63,6 +75,8 @@ func TestPostPayloadAndStatus(t *testing.T) {
 }
 
 func TestSlackErrorSurfaces(t *testing.T) {
+	skipIfNoTCP(t)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
@@ -78,6 +92,8 @@ func TestSlackErrorSurfaces(t *testing.T) {
 }
 
 func TestSlackNilCtxIsHandled(t *testing.T) {
+	skipIfNoTCP(t)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -105,34 +121,34 @@ func TestSlackTextForEventFormatsLifecycle(t *testing.T) {
 		want  string
 	}{
 		{
-			name: "task received",
+			name:  "task received",
 			event: Event{Type: "task_received", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "pending"},
-			want: "[task_received] batch=b1 | task=task-1 (Task One) | status=pending",
+			want:  "[task_received] batch=b1 | task=task-1 (Task One) | status=pending",
 		},
 		{
-			name: "task started",
+			name:  "task started",
 			event: Event{Type: "task_started", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One"},
-			want: "[task_started] batch=b1 | start batch for task task-1 (Task One)",
+			want:  "[task_started] batch=b1 | start batch for task task-1 (Task One)",
 		},
 		{
-			name: "attempt started",
+			name:  "attempt started",
 			event: Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "in_progress", Attempt: 1},
-			want: "[attempt_started] batch=b1 | task=task-1 (Task One) | status=in_progress | attempt=1",
+			want:  "[attempt_started] batch=b1 | task=task-1 (Task One) | status=in_progress | attempt=1",
 		},
 		{
-			name: "verification succeeded",
+			name:  "verification succeeded",
 			event: Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "succeeded", Attempt: 1, Details: "Reason: looks good\nDetails: all checks passed"},
-			want: "[verification_succeeded] batch=b1 | task=task-1 (Task One) | status=succeeded | attempt=1\nReason: looks good\nDetails: all checks passed",
+			want:  "[verification_succeeded] batch=b1 | task=task-1 (Task One) | status=succeeded | attempt=1\nReason: looks good\nDetails: all checks passed",
 		},
 		{
-			name: "task finished",
+			name:  "task finished",
 			event: Event{Type: "task_finished", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "succeeded", CommitHash: "abc123"},
-			want: "[task_finished] batch=b1 | task=task-1 (Task One) | status=succeeded | commit=abc123",
+			want:  "[task_finished] batch=b1 | task=task-1 (Task One) | status=succeeded | commit=abc123",
 		},
 		{
-			name: "batch idle",
+			name:  "batch idle",
 			event: Event{Type: "batch_idle", BatchID: "b1", Status: "idle"},
-			want: "[batch_idle] batch=b1 | status=idle",
+			want:  "[batch_idle] batch=b1 | status=idle",
 		},
 	}
 
