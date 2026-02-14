@@ -14,10 +14,11 @@ func (a *App) registerRoutes() {
 	a.router.Use(a.requestIDMiddleware)
 	a.router.Use(a.loggingMiddleware)
 	a.router.Use(a.recoveryMiddleware)
+	a.router.MethodNotAllowedHandler = http.HandlerFunc(methodNotAllowedHandler)
 
 	a.router.HandleFunc("/health", a.healthHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/version", a.versionHandler).Methods(http.MethodGet)
-	a.router.HandleFunc("/restart", a.restartHandler).Methods(http.MethodPost, http.MethodGet)
+	a.router.HandleFunc("/restart", a.restartHandler).Methods(http.MethodPost)
 
 	a.router.HandleFunc("/repository", a.createRepositoryHandler).Methods(http.MethodPost)
 	a.router.HandleFunc("/repository", a.listRepositoriesHandler).Methods(http.MethodGet)
@@ -44,4 +45,8 @@ func (a *App) registerRoutes() {
 	a.router.Handle("/app", ui.IndexHandler()).Methods(http.MethodGet)
 	a.router.Handle("/app/", ui.IndexHandler()).Methods(http.MethodGet)
 	a.router.PathPrefix("/app/static/").Handler(http.StripPrefix("/app/static/", ui.StaticHandler())).Methods(http.MethodGet)
+}
+
+func methodNotAllowedHandler(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
