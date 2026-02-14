@@ -20,7 +20,7 @@ type VerificationTask struct {
 	cfg           config.Config
 	executionTask *ExecutionTask
 	instruction   string
-	exec          func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error)
+	exec          func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
 // NewVerificationTask constructs a VerificationTask bound to an ExecutionTask
@@ -36,7 +36,7 @@ func NewVerificationTask(cfg config.Config, executionTask *ExecutionTask, instru
 
 // Execute delegates to executeTaskWithStructuredOutput with the verification
 // prompt and the execution task's dependencies.
-func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, taskID, epicID string) (storage.TaskRunStatus, string, error) {
+func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, taskID, parentID string) (storage.TaskRunStatus, string, error) {
 	if t.executionTask == nil {
 		return storage.TaskRunStatusFailed, "", fmt.Errorf("execution task reference is nil")
 	}
@@ -75,5 +75,5 @@ func (t *VerificationTask) Execute(ctx context.Context, batch *storage.Batch, ta
 		prompt = fmt.Sprintf(prompt, taskID)
 	}
 
-	return t.exec(ctx, t.executionTask.copilot, t.executionTask.storage, t.executionTask.tracker, notifier, logger, repoPath, newRunID, now, batch, taskID, epicID, prompt)
+	return t.exec(ctx, t.executionTask.copilot, t.executionTask.storage, t.executionTask.tracker, notifier, logger, repoPath, newRunID, now, batch, taskID, parentID, prompt)
 }

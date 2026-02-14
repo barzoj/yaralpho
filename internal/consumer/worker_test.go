@@ -20,7 +20,7 @@ import (
 
 func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	ctx := context.Background()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 
 	st := newFakeStorage()
 	st.batches["b1"] = batch
@@ -71,7 +71,7 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	require.Equal(t, "s123-verify", verifyRun.SessionID)
 
 	require.Len(t, st.sessionEvents, 2)
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 
 	require.Len(t, nt.events, 4)
 	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "pending"}, nt.events[0])
@@ -87,7 +87,7 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 
 	firstRunEvents := make(chan copilot.RawEvent, 1)
 	firstRunEvents <- copilot.RawEvent{"type": "session.idle", "id": "ev-1"}
@@ -127,13 +127,13 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 	require.Equal(t, "s-verify", verifyRun.SessionID)
 
 	require.Len(t, st.sessionEvents, 1)
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 	require.True(t, cp.stopped)
 }
 
 func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	ctx := context.Background()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 
 	st := newFakeStorage()
 	st.batches["b1"] = batch
@@ -175,30 +175,30 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 
 	run1 := st.runs["run-2"]
 	require.Equal(t, "child-2", run1.TaskRef)
-	require.Equal(t, "epic-1", run1.EpicRef)
+	require.Equal(t, "epic-1", run1.ParentRef)
 	require.Equal(t, storage.TaskRunStatusSucceeded, run1.Status)
 
 	verifyRun1 := st.runs["run-3"]
 	require.Equal(t, "child-2", verifyRun1.TaskRef)
-	require.Equal(t, "epic-1", verifyRun1.EpicRef)
+	require.Equal(t, "epic-1", verifyRun1.ParentRef)
 	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun1.Status)
 
 	run2 := st.runs["run-4"]
 	require.Equal(t, "child-3", run2.TaskRef)
-	require.Equal(t, "epic-1", run2.EpicRef)
+	require.Equal(t, "epic-1", run2.ParentRef)
 	require.Equal(t, storage.TaskRunStatusSucceeded, run2.Status)
 
 	verifyRun2 := st.runs["run-5"]
 	require.Equal(t, "child-3", verifyRun2.TaskRef)
-	require.Equal(t, "epic-1", verifyRun2.EpicRef)
+	require.Equal(t, "epic-1", verifyRun2.ParentRef)
 	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun2.Status)
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 }
 
 func TestWorker_ExecutionListHappyPath(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 
 	eventQueue := make([]chan copilot.RawEvent, 0, 8)
 	for i := 0; i < 8; i++ {
@@ -271,7 +271,7 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 		"verify\n\nVerify task task-2",
 	}, cp.prompts)
 
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 	require.Len(t, nt.batchIdle, 1)
 	require.Equal(t, "b1", nt.batchIdle[0])
 
@@ -305,7 +305,7 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.runs["r1"] = storage.TaskRun{ID: "r1", BatchID: "b1", TaskRef: "child-1", Status: storage.TaskRunStatusSucceeded}
 
 	tr := &fakeTracker{
@@ -325,7 +325,7 @@ func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
 	err := w.handleItem(ctx, payload)
 	require.NoError(t, err)
 
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 	require.Len(t, nt.batchIdle, 1)
 	require.Len(t, st.runs, 1) // no new run created
 }
@@ -333,7 +333,7 @@ func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
 func TestWorker_EpicRetriesIncompleteChildren(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.runs["failed"] = storage.TaskRun{ID: "failed", BatchID: "b1", TaskRef: "child-1", Status: storage.TaskRunStatusFailed}
 	st.runs["done"] = storage.TaskRun{ID: "done", BatchID: "b1", TaskRef: "child-2", Status: storage.TaskRunStatusSucceeded}
 
@@ -365,13 +365,13 @@ func TestWorker_EpicRetriesIncompleteChildren(t *testing.T) {
 		"exec\n\nPick first ready task from epic epic-1 and execute",
 		"verify\n\nVerify task child-1",
 	}, cp.prompts)
-	require.Equal(t, storage.BatchStatusIdle, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 }
 
 func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 
 	cp := &fakeCopilot{startErr: errors.New("no token")}
 	tr := &fakeTracker{}
@@ -398,8 +398,8 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
-	st.batches["b2"] = storage.Batch{ID: "b2", Status: storage.BatchStatusCreated}
+	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
+	st.batches["b2"] = storage.Batch{ID: "b2", Status: storage.BatchStatusPending}
 
 	firstExec := make(chan copilot.RawEvent)
 	cp := &fakeCopilot{
@@ -457,7 +457,7 @@ func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 func TestExecuteTask_Success(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	cp := &fakeCopilot{events: closedChan(), sessionID: "s-success"}
@@ -484,19 +484,19 @@ func TestExecuteTask_Success(t *testing.T) {
 
 	run := st.runs["run-success"]
 	require.Equal(t, "task-1", run.TaskRef)
-	require.Equal(t, "epic-1", run.EpicRef)
+	require.Equal(t, "epic-1", run.ParentRef)
 	require.Equal(t, "s-success", run.SessionID)
 	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
 	require.Equal(t, &now, run.FinishedAt)
 
 	require.Len(t, nt.finished, 1)
-	require.Equal(t, storage.BatchStatusCreated, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
 }
 
 func TestExecuteTask_StartSessionErrorSetsFailed(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	cp := &fakeCopilot{startErr: errors.New("boom")}
@@ -531,7 +531,7 @@ func TestExecuteTask_StartSessionErrorSetsFailed(t *testing.T) {
 func TestExecuteTaskWithStructuredOutput_Success(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	cp := &fakeCopilot{events: closedChan(), sessionID: "s-structured"}
@@ -559,14 +559,14 @@ func TestExecuteTaskWithStructuredOutput_Success(t *testing.T) {
 
 	run := st.runs["run-structured"]
 	require.Equal(t, "task-structured", run.TaskRef)
-	require.Equal(t, "epic-structured", run.EpicRef)
+	require.Equal(t, "epic-structured", run.ParentRef)
 	require.Equal(t, &now, run.FinishedAt)
 }
 
 func TestExecuteTaskWithStructuredOutput_ReturnsLatestAssistantMessage(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	events := make(chan copilot.RawEvent, 3)
@@ -609,7 +609,7 @@ func TestExecuteTask_PublishesSessionEventsToBus(t *testing.T) {
 	defer setSessionEventBus(nil)
 
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	events := make(chan copilot.RawEvent, 1)
@@ -654,7 +654,7 @@ func TestExecuteTask_PublishErrorNotifies(t *testing.T) {
 	defer setSessionEventBus(nil)
 
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	events := make(chan copilot.RawEvent, 1)
@@ -692,7 +692,7 @@ func TestExecuteTask_PublishErrorNotifies(t *testing.T) {
 func TestExecuteTaskWithAssistantMessages_ReturnsAllAssistantMessages(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	events := make(chan copilot.RawEvent, 4)
@@ -733,7 +733,7 @@ func TestExecuteTaskWithAssistantMessages_ReturnsAllAssistantMessages(t *testing
 func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
 	cp := &fakeCopilot{startErr: errors.New("structured boom")}
@@ -769,18 +769,18 @@ func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.
 func TestSetBatchStatus(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusCreated}
+	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 	st.batches["b1"] = batch
 
-	setBatchStatus(ctx, st, zap.NewNop(), nil, storage.BatchStatusRunning)
+	setBatchStatus(ctx, st, zap.NewNop(), nil, storage.BatchStatusInProgress)
 	require.Equal(t, 0, st.updateBatchCalls)
 
-	setBatchStatus(ctx, st, zap.NewNop(), &batch, storage.BatchStatusCreated)
+	setBatchStatus(ctx, st, zap.NewNop(), &batch, storage.BatchStatusPending)
 	require.Equal(t, 0, st.updateBatchCalls)
 
-	setBatchStatus(ctx, st, zap.NewNop(), &batch, storage.BatchStatusRunning)
+	setBatchStatus(ctx, st, zap.NewNop(), &batch, storage.BatchStatusInProgress)
 	require.Equal(t, 1, st.updateBatchCalls)
-	require.Equal(t, storage.BatchStatusRunning, st.batches["b1"].Status)
+	require.Equal(t, storage.BatchStatusInProgress, st.batches["b1"].Status)
 }
 
 func closedChan() chan copilot.RawEvent {

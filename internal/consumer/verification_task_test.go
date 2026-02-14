@@ -24,14 +24,14 @@ func TestVerificationTaskDelegatesToStructuredExecution(t *testing.T) {
 	var (
 		capturedPrompt string
 		runRef         string
-		epicRef        string
+		parentRef      string
 	)
 
 	task := NewVerificationTask(cfg, execTask, " verify prompt ")
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, run, epic, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, run, parent, prompt string) (storage.TaskRunStatus, string, error) {
 		capturedPrompt = prompt
 		runRef = run
-		epicRef = epic
+		parentRef = parent
 
 		require.Equal(t, "/repo", repoPath)
 		require.NotNil(t, newRunID)
@@ -48,7 +48,7 @@ func TestVerificationTaskDelegatesToStructuredExecution(t *testing.T) {
 	require.Equal(t, "structured response", resp)
 	require.Equal(t, "verify base\n\nverify prompt", capturedPrompt)
 	require.Equal(t, "task-verify", runRef)
-	require.Equal(t, "epic-verify", epicRef)
+	require.Equal(t, "epic-verify", parentRef)
 }
 
 func TestVerificationTaskRequiresExecutionReference(t *testing.T) {

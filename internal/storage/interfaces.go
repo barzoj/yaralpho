@@ -2,9 +2,10 @@ package storage
 
 import "context"
 
-// Storage defines persistence operations for batches, task runs, and session
-// events. Implementations must remain agnostic to any specific database
-// driver types and honor the provided context for cancellation and timeouts.
+// Storage defines persistence operations for repositories, agents, batches,
+// task runs, and session events. Implementations must remain agnostic to any
+// specific database driver types and honor the provided context for
+// cancellation and timeouts.
 type Storage interface {
 	CreateRepository(ctx context.Context, repo *Repository) error
 	UpdateRepository(ctx context.Context, repo *Repository) error

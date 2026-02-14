@@ -13,8 +13,8 @@ import (
 )
 
 type agentRequest struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name    string `json:"name"`
+	Runtime string `json:"runtime"`
 }
 
 func (a *App) listAgentsHandler(w http.ResponseWriter, r *http.Request) {
@@ -33,13 +33,13 @@ func (a *App) createAgentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	req.Runtime = strings.ToLower(strings.TrimSpace(req.Runtime))
 
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if !isValidAgentType(req.Type) {
+	if !isValidAgentRuntime(req.Runtime) {
 		writeError(w, http.StatusBadRequest, "invalid agent type")
 		return
 	}
@@ -49,7 +49,7 @@ func (a *App) createAgentHandler(w http.ResponseWriter, r *http.Request) {
 	agent := storage.Agent{
 		ID:        id,
 		Name:      req.Name,
-		Type:      req.Type,
+		Runtime:   req.Runtime,
 		Status:    storage.AgentStatusIdle,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -103,19 +103,19 @@ func (a *App) updateAgentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	req.Runtime = strings.ToLower(strings.TrimSpace(req.Runtime))
 
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if !isValidAgentType(req.Type) {
+	if !isValidAgentRuntime(req.Runtime) {
 		writeError(w, http.StatusBadRequest, "invalid agent type")
 		return
 	}
 
 	existing.Name = req.Name
-	existing.Type = req.Type
+	existing.Runtime = req.Runtime
 	existing.UpdatedAt = time.Now().UTC()
 
 	if err := a.storage.UpdateAgent(r.Context(), existing); err != nil {
@@ -153,7 +153,7 @@ func (a *App) deleteAgentHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func isValidAgentType(t string) bool {
+func isValidAgentRuntime(t string) bool {
 	switch t {
 	case "codex", "copilot":
 		return true

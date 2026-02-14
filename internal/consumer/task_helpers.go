@@ -44,7 +44,7 @@ func executeTask(
 	now func() time.Time,
 	batch *storage.Batch,
 	runRef,
-	epicRef,
+	parentRef,
 	prompt string,
 ) (storage.TaskRunStatus, error) {
 	runID := newRunID()
@@ -65,7 +65,7 @@ func executeTask(
 			ID:         runID,
 			BatchID:    batch.ID,
 			TaskRef:    runRef,
-			EpicRef:    epicRef,
+			ParentRef:  parentRef,
 			SessionID:  "",
 			StartedAt:  now(),
 			FinishedAt: &finished,
@@ -85,7 +85,7 @@ func executeTask(
 		ID:        runID,
 		BatchID:   batch.ID,
 		TaskRef:   runRef,
-		EpicRef:   epicRef,
+		ParentRef: parentRef,
 		SessionID: sessionID,
 		StartedAt: now(),
 		Status:    storage.TaskRunStatusRunning,
@@ -154,7 +154,7 @@ eventLoop:
 		_ = nt.NotifyTaskFinished(ctx, batch.ID, run.ID, run.TaskRef, taskName, string(run.Status), "")
 	case storage.TaskRunStatusStopped:
 		_ = nt.NotifyBatchIdle(ctx, batch.ID)
-		setBatchStatus(ctx, st, logger, batch, storage.BatchStatusIdle)
+		setBatchStatus(ctx, st, logger, batch, storage.BatchStatusPending)
 	default:
 		if finalErr == nil {
 			finalErr = fmt.Errorf("task run failed")
@@ -178,7 +178,7 @@ func executeTaskWithStructuredOutput(
 	now func() time.Time,
 	batch *storage.Batch,
 	runRef,
-	epicRef,
+	parentRef,
 	prompt string,
 ) (storage.TaskRunStatus, string, error) {
 	if logger == nil {
@@ -187,7 +187,7 @@ func executeTaskWithStructuredOutput(
 
 	// Capture the run ID up front so we can retrieve the persisted run and its session events after execution.
 	generatedRunID := newRunID()
-	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
+	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, parentRef, prompt)
 
 	structuredOutput := ""
 	if st == nil || generatedRunID == "" {
@@ -228,7 +228,7 @@ func executeTaskWithAssistantMessages(
 	now func() time.Time,
 	batch *storage.Batch,
 	runRef,
-	epicRef,
+	parentRef,
 	prompt string,
 ) (storage.TaskRunStatus, string, error) {
 	if logger == nil {
@@ -236,7 +236,7 @@ func executeTaskWithAssistantMessages(
 	}
 
 	generatedRunID := newRunID()
-	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, epicRef, prompt)
+	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, parentRef, prompt)
 
 	if st == nil || generatedRunID == "" {
 		return status, "", err

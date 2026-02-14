@@ -954,7 +954,7 @@
       ["Run ID", run.run_id],
       ["Batch ID", run.batch_id],
       ["Task Ref", run.task_ref || "—"],
-      ["Epic Ref", run.epic_ref || "—"],
+      ["Epic Ref", run.parent_ref || "—"],
       ["Status", run.status || "unknown"],
       ["Session ID", run.session_id || "—"],
       ["Started", formatDate(run.started_at)],

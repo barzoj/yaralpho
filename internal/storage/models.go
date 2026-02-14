@@ -2,35 +2,38 @@ package storage
 
 import "time"
 
-// BatchStatus captures lifecycle states for a batch of work.
+// BatchStatus captures lifecycle states for a batch of work processed
+// sequentially within a repository.
 type BatchStatus string
 
 const (
-	// BatchStatusPending represents a batch that is created and awaiting scheduling.
+	// BatchStatusPending represents a batch with items waiting to be scheduled or retried.
 	BatchStatusPending BatchStatus = "pending"
-	BatchStatusCreated BatchStatus = "created"
-	BatchStatusRunning BatchStatus = "running"
-	BatchStatusIdle    BatchStatus = "idle"
-	// BatchStatusInProgress mirrors pending->in_progress transitions for repository-aware scheduling.
+	// BatchStatusInProgress indicates an item from the batch is currently executing.
 	BatchStatusInProgress BatchStatus = "in_progress"
 	// BatchStatusPaused prevents new items from starting while allowing in-flight work to finish.
-	BatchStatusPaused      BatchStatus = "paused"
-	BatchStatusDone        BatchStatus = "done"
-	BatchStatusFailed      BatchStatus = "failed"
-	BatchStatusBlockedAuth BatchStatus = "blocked_auth"
+	BatchStatusPaused BatchStatus = "paused"
+	// BatchStatusDone marks a batch whose items all completed successfully.
+	BatchStatusDone BatchStatus = "done"
+	// BatchStatusFailed marks a batch with a terminally failed item (retries exhausted).
+	BatchStatusFailed BatchStatus = "failed"
 )
 
-// ItemStatus captures lifecycle states for a single batch item.
+// ItemStatus captures lifecycle states for a single batch item with retry attempts.
 type ItemStatus string
 
 const (
-	ItemStatusPending    ItemStatus = "pending"
+	// ItemStatusPending indicates the item has not started or is awaiting retry.
+	ItemStatusPending ItemStatus = "pending"
+	// ItemStatusInProgress indicates the item is currently being executed.
 	ItemStatusInProgress ItemStatus = "in_progress"
-	ItemStatusDone       ItemStatus = "done"
-	ItemStatusFailed     ItemStatus = "failed"
+	// ItemStatusDone indicates the item finished successfully.
+	ItemStatusDone ItemStatus = "done"
+	// ItemStatusFailed indicates retries were exhausted and execution stopped.
+	ItemStatusFailed ItemStatus = "failed"
 )
 
-// TaskRunStatus represents execution states for a single task run.
+// TaskRunStatus represents execution states for a single task run attempt.
 type TaskRunStatus string
 
 const (
@@ -51,9 +54,9 @@ type Repository struct {
 
 // BatchItem represents a single ordered item within a batch and its retry state.
 type BatchItem struct {
-	Input    string `json:"input" bson:"input"`
-	Status   string `json:"status" bson:"status"`
-	Attempts int    `json:"attempts" bson:"attempts"`
+	Input    string     `json:"input" bson:"input"`
+	Status   ItemStatus `json:"status" bson:"status"`
+	Attempts int        `json:"attempts" bson:"attempts"`
 }
 
 // Batch groups a set of input items processed together and tracked as a unit.
@@ -74,7 +77,6 @@ type TaskRun struct {
 	BatchID      string        `json:"batch_id" bson:"batch_id"`
 	RepositoryID string        `json:"repository_id" bson:"repository_id"`
 	TaskRef      string        `json:"task_ref" bson:"task_ref"`
-	EpicRef      string        `json:"epic_ref,omitempty" bson:"epic_ref,omitempty"`
 	ParentRef    string        `json:"parent_ref,omitempty" bson:"parent_ref,omitempty"`
 	SessionID    string        `json:"session_id" bson:"session_id"`
 	StartedAt    time.Time     `json:"started_at" bson:"started_at"`
@@ -101,7 +103,7 @@ const (
 type Agent struct {
 	ID        string      `json:"agent_id" bson:"agent_id"`
 	Name      string      `json:"name" bson:"name"`
-	Type      string      `json:"type" bson:"type"`
+	Runtime   string      `json:"runtime" bson:"runtime"`
 	Status    AgentStatus `json:"status" bson:"status"`
 	CreatedAt time.Time   `json:"created_at" bson:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at" bson:"updated_at"`

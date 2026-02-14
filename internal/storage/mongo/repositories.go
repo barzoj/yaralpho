@@ -121,9 +121,6 @@ func (c *Client) RepositoryHasActiveBatches(ctx context.Context, id string) (boo
 			storage.BatchStatusPending,
 			storage.BatchStatusInProgress,
 			storage.BatchStatusPaused,
-			storage.BatchStatusCreated,
-			storage.BatchStatusRunning,
-			storage.BatchStatusIdle,
 		}},
 	}
 	count, err := c.batches.CountDocuments(ctx, filter)

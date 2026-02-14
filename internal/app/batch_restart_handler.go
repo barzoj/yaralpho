@@ -41,7 +41,7 @@ func (a *App) restartBatchHandler(w http.ResponseWriter, r *http.Request) {
 
 	failedIdx := -1
 	for i := range batch.Items {
-		if batch.Items[i].Status == string(storage.ItemStatusFailed) {
+		if batch.Items[i].Status == storage.ItemStatusFailed {
 			failedIdx = i
 			break
 		}
@@ -51,7 +51,7 @@ func (a *App) restartBatchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batch.Items[failedIdx].Status = string(storage.ItemStatusPending)
+	batch.Items[failedIdx].Status = storage.ItemStatusPending
 	batch.Items[failedIdx].Attempts = 0
 	batch.Status = storage.BatchStatusPending
 	batch.UpdatedAt = time.Now().UTC()

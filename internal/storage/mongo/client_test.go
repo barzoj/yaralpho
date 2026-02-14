@@ -43,8 +43,8 @@ func TestMongoStorageCRUD(t *testing.T) {
 		RepositoryID: "repo-1",
 		CreatedAt:    now,
 		UpdatedAt:    now,
-		Items:        []storage.BatchItem{{Input: "task-1", Status: string(storage.BatchStatusCreated), Attempts: 0}},
-		Status:       storage.BatchStatusCreated,
+		Items:        []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending, Attempts: 0}},
+		Status:       storage.BatchStatusPending,
 	}
 	if err := client.CreateBatch(ctx, batch); err != nil {
 		t.Fatalf("CreateBatch: %v", err)
@@ -54,11 +54,11 @@ func TestMongoStorageCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBatch: %v", err)
 	}
-	if fetchedBatch.Status != storage.BatchStatusCreated {
+	if fetchedBatch.Status != storage.BatchStatusPending {
 		t.Fatalf("unexpected batch status: %s", fetchedBatch.Status)
 	}
 
-	batch.Status = storage.BatchStatusRunning
+	batch.Status = storage.BatchStatusInProgress
 	if err := client.UpdateBatch(ctx, batch); err != nil {
 		t.Fatalf("UpdateBatch: %v", err)
 	}

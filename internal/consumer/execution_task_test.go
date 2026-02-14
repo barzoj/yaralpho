@@ -29,12 +29,12 @@ func TestExecutionTaskBuildsPromptWithComments(t *testing.T) {
 	execCalls := 0
 
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "task instruction")
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, prompt string) (storage.TaskRunStatus, string, error) {
 		execCalls++
 		capturedPrompt = prompt
 		require.Equal(t, "/repo", repoPath)
 		require.Equal(t, "task-1", runRef)
-		require.Equal(t, "epic-1", epicRef)
+		require.Equal(t, "epic-1", parentRef)
 		require.NotNil(t, newRunID)
 		require.NotNil(t, now)
 		return storage.TaskRunStatusSucceeded, "", nil
@@ -56,7 +56,7 @@ func TestExecutionTaskWithoutCommentsUsesBasePrompt(t *testing.T) {
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), " /repo ", "   ")
 
 	var prompt string
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, p string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, p string) (storage.TaskRunStatus, string, error) {
 		prompt = p
 		require.Equal(t, "/repo", repoPath)
 		return storage.TaskRunStatusSucceeded, "", nil
@@ -76,7 +76,7 @@ func TestExecutionTaskPropagatesFetchError(t *testing.T) {
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "base instruction")
 
 	called := false
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, epicRef, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, prompt string) (storage.TaskRunStatus, string, error) {
 		called = true
 		return storage.TaskRunStatusSucceeded, "", nil
 	}

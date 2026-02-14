@@ -69,7 +69,7 @@ func (a *App) addBatchHandler(w http.ResponseWriter, r *http.Request) {
 	for _, it := range items {
 		batch.Items = append(batch.Items, storage.BatchItem{
 			Input:    it,
-			Status:   string(storage.ItemStatusPending),
+			Status:   storage.ItemStatusPending,
 			Attempts: 0,
 		})
 	}

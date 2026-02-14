@@ -293,7 +293,7 @@ func TestBatchCreateUnderRepository(t *testing.T) {
 	require.Equal(t, "test", batch.SessionName)
 	require.Len(t, batch.Items, 2)
 	for _, it := range batch.Items {
-		require.Equal(t, string(storage.ItemStatusPending), it.Status)
+		require.Equal(t, storage.ItemStatusPending, it.Status)
 		require.Equal(t, 0, it.Attempts)
 	}
 
@@ -350,8 +350,8 @@ func TestRestartFailedBatch(t *testing.T) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Items: []storage.BatchItem{
-			{Input: "first", Status: string(storage.ItemStatusDone), Attempts: 1},
-			{Input: "second", Status: string(storage.ItemStatusFailed), Attempts: 2},
+			{Input: "first", Status: storage.ItemStatusDone, Attempts: 1},
+			{Input: "second", Status: storage.ItemStatusFailed, Attempts: 2},
 		},
 	}
 	app := newTestApp(t, st, q)
@@ -370,7 +370,7 @@ func TestRestartFailedBatch(t *testing.T) {
 
 	updated := st.batches[batchID]
 	require.Equal(t, storage.BatchStatusPending, updated.Status)
-	require.Equal(t, string(storage.ItemStatusPending), updated.Items[1].Status)
+	require.Equal(t, storage.ItemStatusPending, updated.Items[1].Status)
 	require.Equal(t, 0, updated.Items[1].Attempts)
 	require.True(t, updated.UpdatedAt.After(now))
 }
@@ -385,7 +385,7 @@ func TestRestartFailedBatch_InvalidState(t *testing.T) {
 		ID:           batchID,
 		RepositoryID: repoID,
 		Status:       storage.BatchStatusPending,
-		Items:        []storage.BatchItem{{Input: "task", Status: string(storage.ItemStatusPending)}},
+		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusPending}},
 	}
 	app := newTestApp(t, st, q)
 
@@ -406,7 +406,7 @@ func TestRestartFailedBatch_NoFailedItem(t *testing.T) {
 		ID:           batchID,
 		RepositoryID: repoID,
 		Status:       storage.BatchStatusFailed,
-		Items:        []storage.BatchItem{{Input: "task", Status: string(storage.ItemStatusDone)}},
+		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusDone}},
 	}
 	app := newTestApp(t, st, q)
 
@@ -425,7 +425,7 @@ func TestRestartFailedBatch_RepositoryMismatch(t *testing.T) {
 		ID:           "batch-1",
 		RepositoryID: "repo-2",
 		Status:       storage.BatchStatusFailed,
-		Items:        []storage.BatchItem{{Input: "task", Status: string(storage.ItemStatusFailed)}},
+		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusFailed}},
 	}
 	app := newTestApp(t, st, q)
 

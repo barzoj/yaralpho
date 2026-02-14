@@ -58,5 +58,5 @@ func TestRunDetailHandlerIncludesRepositoryContext(t *testing.T) {
 	runPayload, ok := body["run"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, repoID, runPayload["repository_id"])
-	require.Nil(t, runPayload["epic_ref"])
+	require.Nil(t, runPayload["parent_ref"])
 }

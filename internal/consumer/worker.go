@@ -130,7 +130,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 		_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
 		return fmt.Errorf("get batch %s: %w", item.BatchID, err)
 	}
-	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusRunning)
+	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusInProgress)
 	w.notifyTaskEvent(ctx, notify.Event{Type: "task_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: taskName, Status: "running"})
 
 	runs, err := w.storage.ListTaskRuns(ctx, item.BatchID)
@@ -173,7 +173,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 
 		if verifyStatus == storage.TaskRunStatusSucceeded {
 			w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, item.TaskRef), Status: "succeeded", Attempt: attempts, Details: formatAgentResponseText(agentResp, output)})
-			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
+			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusPending)
 			return nil
 		}
 
@@ -194,7 +194,7 @@ func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item Queu
 
 		child, ok := firstAvailableChild(children, runs)
 		if !ok {
-			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusIdle)
+			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusPending)
 			_ = w.notifier.NotifyBatchIdle(ctx, item.BatchID)
 			w.logger.Info("no remaining child tasks for epic", zap.String("epic", item.TaskRef))
 			return nil
