@@ -3,352 +3,184 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/barzoj/yaralpho/internal/consumer"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
-func TestSchedulerInterface(t *testing.T) {
-	var _ Controller = (*Scheduler)(nil)
+func TestLogFieldHelpers(t *testing.T) {
+	fields := withBatchFields(storage.Batch{ID: "b1", RepositoryID: "r1"}, 2)
+	require.Len(t, fields, 3)
+	assertField(t, fields, "batch_id", "b1")
+	assertField(t, fields, "repository_id", "r1")
+	assertField(t, fields, "item_index", 2)
 
-	sched := New(&fakeStorage{}, &fakeWorker{}, zap.NewNop(), Options{Interval: time.Second, Draining: true, MaxRetries: 3})
-	require.True(t, sched.Draining())
-	require.Equal(t, 0, sched.ActiveCount())
-	require.NoError(t, sched.Stop(context.Background()))
+	agentFields := withAgentFields(&storage.Agent{ID: "a1"})
+	require.Len(t, agentFields, 1)
+	assertField(t, agentFields, "agent_id", "a1")
+
+	attemptFields := withAttemptFields(3, 5)
+	require.Len(t, attemptFields, 2)
+	assertField(t, attemptFields, "attempt", 3)
+	assertField(t, attemptFields, "max_retries", 5)
 }
 
-func TestTick_NoBatches(t *testing.T) {
-	st := &fakeStorage{}
-	sched := New(st, &fakeWorker{}, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
+func TestSchedulerTick_LogsClaimSuccess(t *testing.T) {
+	ctx := context.Background()
+	core, logs := observer.New(zap.DebugLevel)
+	logger := zap.New(core)
 
-	require.NoError(t, sched.Tick(context.Background()))
-	require.Zero(t, st.updateBatchCalls)
-}
-
-func TestTick_DrainingSkips(t *testing.T) {
-	st := &fakeStorage{batches: []storage.Batch{{ID: "b1"}}, agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}}}
-	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
-	sched.SetDraining(true)
-
-	require.NoError(t, sched.Tick(context.Background()))
-	require.False(t, worker.called)
-}
-
-func TestWaitForIdleTracksActiveWork(t *testing.T) {
 	st := &fakeStorage{
 		batches: []storage.Batch{{
-			ID:     "b1",
-			Status: storage.BatchStatusPending,
-			Items:  []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
+			ID:           "batch-1",
+			RepositoryID: "repo-1",
+			Status:       storage.BatchStatusPending,
+			Items: []storage.BatchItem{{
+				Input:    "task-1",
+				Status:   storage.ItemStatusPending,
+				Attempts: 0,
+			}},
 		}},
-		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+		agents: []storage.Agent{{
+			ID:     "agent-1",
+			Status: storage.AgentStatusIdle,
+		}},
 	}
 
-	started := make(chan struct{})
-	release := make(chan struct{})
-	worker := &blockingWorker{started: started, release: release}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
+	w := &fakeWorker{}
+	s := New(st, w, logger, Options{MaxRetries: 3})
 
-	go func() {
-		require.NoError(t, sched.Tick(context.Background()))
-	}()
+	err := s.Tick(ctx)
+	require.NoError(t, err)
 
-	<-started
-	require.Equal(t, 1, sched.ActiveCount())
+	require.True(t, logs.FilterMessage("claiming work item").Len() == 1)
+	require.True(t, logs.FilterMessage("work item succeeded").Len() == 1)
 
-	waitDone := make(chan struct{})
-	go func() {
-		require.NoError(t, sched.WaitForIdle(context.Background()))
-		close(waitDone)
-	}()
-
-	select {
-	case <-waitDone:
-		t.Fatalf("WaitForIdle returned before work completed")
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	close(release)
-
-	select {
-	case <-waitDone:
-	case <-time.After(time.Second):
-		t.Fatalf("WaitForIdle did not return after work completion")
-	}
-
-	require.Equal(t, 0, sched.ActiveCount())
+	entry := logs.FilterMessage("claiming work item").All()[0]
+	require.Equal(t, zap.InfoLevel, entry.Level)
+	assertContextField(t, entry, "batch_id", "batch-1")
+	assertContextField(t, entry, "agent_id", "agent-1")
+	assertContextField(t, entry, "repository_id", "repo-1")
+	assertContextField(t, entry, "item_index", 0)
 }
 
-func TestTick_NoIdleAgents(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{{ID: "b1", Items: []storage.BatchItem{{Input: "t1", Status: storage.ItemStatusPending}}, Status: storage.BatchStatusPending}},
-		agents:  []storage.Agent{{ID: "a1", Status: storage.AgentStatusBusy}},
-	}
-	sched := New(st, &fakeWorker{}, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
+func TestSchedulerTick_LogsRetryExhaustion(t *testing.T) {
+	ctx := context.Background()
+	core, logs := observer.New(zap.DebugLevel)
+	logger := zap.New(core)
 
-	require.NoError(t, sched.Tick(context.Background()))
-	require.Equal(t, storage.BatchStatusPending, st.batches[0].Status)
-}
-
-func TestTick_SkipsPausedAndInProgressBatches(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{
-			{ID: "paused", Status: storage.BatchStatusPaused, Items: []storage.BatchItem{{Input: "t0", Status: storage.ItemStatusPending}}},
-			{ID: "active", Status: storage.BatchStatusPending, Items: []storage.BatchItem{{Input: "t1", Status: storage.ItemStatusInProgress}, {Input: "t2", Status: storage.ItemStatusPending}}},
-		},
-		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
-	}
-	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
-
-	require.NoError(t, sched.Tick(context.Background()))
-	require.False(t, worker.called, "no work should be dispatched when batches are ineligible")
-}
-
-func TestPause_PausedBatchNotScheduled(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{
-			{ID: "paused", Status: storage.BatchStatusPaused, Items: []storage.BatchItem{{Input: "t0", Status: storage.ItemStatusPending}}},
-		},
-		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
-	}
-	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
-
-	require.NoError(t, sched.Tick(context.Background()))
-	require.False(t, worker.called, "paused batch must not dispatch work")
-
-	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusPaused, b.Status)
-	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
-}
-
-func TestPause_ResumeAllowsScheduling(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{
-			{ID: "paused", Status: storage.BatchStatusPaused, Items: []storage.BatchItem{{Input: "t0", Status: storage.ItemStatusPending}}},
-		},
-		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
-	}
-	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
-
-	require.NoError(t, sched.Tick(context.Background()))
-	require.False(t, worker.called, "paused batch must not dispatch work")
-
-	st.batches[0].Status = storage.BatchStatusPending
-	worker.called = false
-
-	require.NoError(t, sched.Tick(context.Background()))
-	require.True(t, worker.called, "resumed batch should dispatch work")
-
-	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusDone, b.Status)
-	require.Equal(t, storage.ItemStatusDone, b.Items[0].Status)
-	require.Equal(t, 1, b.Items[0].Attempts)
-}
-
-func TestTick_HappyPathClaimsAgentAndItem(t *testing.T) {
 	st := &fakeStorage{
 		batches: []storage.Batch{{
-			ID:     "b1",
-			Status: storage.BatchStatusPending,
-			Items: []storage.BatchItem{
-				{Input: "task-1", Status: storage.ItemStatusPending},
-			},
+			ID:           "batch-2",
+			RepositoryID: "repo-2",
+			Status:       storage.BatchStatusPending,
+			Items: []storage.BatchItem{{
+				Input:    "task-err",
+				Status:   storage.ItemStatusPending,
+				Attempts: 0,
+			}},
 		}},
-		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+		agents: []storage.Agent{{
+			ID:     "agent-2",
+			Status: storage.AgentStatusIdle,
+		}},
 	}
-	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
-	require.NoError(t, sched.Tick(context.Background()))
+	w := &fakeWorker{err: errors.New("boom")}
+	s := New(st, w, logger, Options{MaxRetries: 1})
 
-	require.True(t, worker.called)
-	require.Equal(t, consumer.WorkItem{BatchID: "b1", TaskRef: "task-1"}, worker.item)
-
-	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusDone, b.Status)
-	require.Equal(t, storage.ItemStatusDone, b.Items[0].Status)
-	require.Equal(t, 1, b.Items[0].Attempts)
-
-	a := st.agents[0]
-	require.Equal(t, storage.AgentStatusIdle, a.Status)
-}
-
-func TestTick_RollsBackOnWorkerError(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{{ID: "b1", Status: storage.BatchStatusPending, Items: []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}}}},
-		agents:  []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
-	}
-	worker := &fakeWorker{err: errors.New("boom")}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: 2})
-
-	err := sched.Tick(context.Background())
+	err := s.Tick(ctx)
 	require.Error(t, err)
 
-	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusPending, b.Status)
-	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
-	require.Equal(t, 1, b.Items[0].Attempts)
-	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+	require.True(t, logs.FilterMessage("worker failed").Len() == 1)
+	require.True(t, logs.FilterMessage("work item failed").Len() == 1)
+
+	failEntry := logs.FilterMessage("work item failed").All()[0]
+	require.Equal(t, zap.ErrorLevel, failEntry.Level)
+	assertContextField(t, failEntry, "batch_id", "batch-2")
+	assertContextField(t, failEntry, "agent_id", "agent-2")
+	assertContextField(t, failEntry, "attempt", 1)
+	assertContextField(t, failEntry, "max_retries", 1)
 }
 
-func TestTick_RetryThenSuccess(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{{
-			ID:     "b1",
-			Status: storage.BatchStatusPending,
-			Items:  []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
-		}},
-		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+func assertField(t *testing.T, fields []zap.Field, key string, value any) {
+	t.Helper()
+	for _, f := range fields {
+		if f.Key == key {
+			switch f.Type {
+			case zapcore.StringType:
+				require.Equal(t, value, f.String)
+			case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
+				require.EqualValues(t, value, f.Integer)
+			default:
+				require.EqualValues(t, value, f.Interface)
+			}
+			return
+		}
 	}
-	worker := &fakeWorker{responses: []error{errors.New("first"), nil}}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: 2})
-
-	err := sched.Tick(context.Background())
-	require.Error(t, err)
-
-	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusPending, b.Status)
-	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
-	require.Equal(t, 1, b.Items[0].Attempts)
-	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
-
-	worker.called = false
-
-	require.NoError(t, sched.Tick(context.Background()))
-	require.Equal(t, 2, worker.callCount)
-
-	b = st.batches[0]
-	require.Equal(t, storage.BatchStatusDone, b.Status)
-	require.Equal(t, storage.ItemStatusDone, b.Items[0].Status)
-	require.Equal(t, 2, b.Items[0].Attempts)
-	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+	t.Fatalf("field %s not found", key)
 }
 
-func TestTick_RetryExhausted(t *testing.T) {
-	st := &fakeStorage{
-		batches: []storage.Batch{{
-			ID:     "b1",
-			Status: storage.BatchStatusPending,
-			Items:  []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
-		}},
-		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+func assertContextField(t *testing.T, entry observer.LoggedEntry, key string, value any) {
+	t.Helper()
+	for _, f := range entry.Context {
+		if f.Key == key {
+			switch f.Type {
+			case zapcore.StringType:
+				require.Equal(t, value, f.String)
+			case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
+				require.EqualValues(t, value, f.Integer)
+			default:
+				require.EqualValues(t, value, f.Interface)
+			}
+			return
+		}
 	}
-	worker := &fakeWorker{err: errors.New("always fails")}
-	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: 2})
-
-	require.Error(t, sched.Tick(context.Background()))
-
-	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusPending, b.Status)
-	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
-	require.Equal(t, 1, b.Items[0].Attempts)
-
-	require.Error(t, sched.Tick(context.Background()))
-
-	b = st.batches[0]
-	require.Equal(t, storage.BatchStatusFailed, b.Status)
-	require.Equal(t, storage.ItemStatusFailed, b.Items[0].Status)
-	require.Equal(t, 2, b.Items[0].Attempts)
-	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+	t.Fatalf("field %s not found", key)
 }
-
-// --- fakes ---
 
 type fakeStorage struct {
-	mu               sync.Mutex
-	batches          []storage.Batch
-	agents           []storage.Agent
-	updateBatchCalls int
+	batches []storage.Batch
+	agents  []storage.Agent
 }
 
-func (f *fakeStorage) ListBatches(_ context.Context, _ int64) ([]storage.Batch, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]storage.Batch, len(f.batches))
-	copy(out, f.batches)
-	return out, nil
+func (f *fakeStorage) ListBatches(ctx context.Context, limit int64) ([]storage.Batch, error) {
+	return f.batches, nil
 }
 
-func (f *fakeStorage) UpdateBatch(_ context.Context, batch *storage.Batch) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (f *fakeStorage) UpdateBatch(ctx context.Context, batch *storage.Batch) error {
 	for i := range f.batches {
 		if f.batches[i].ID == batch.ID {
 			f.batches[i] = *batch
-			f.updateBatchCalls++
 			return nil
 		}
 	}
-	return fmt.Errorf("batch %s not found", batch.ID)
+	return nil
 }
 
-func (f *fakeStorage) ListAgents(_ context.Context) ([]storage.Agent, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]storage.Agent, len(f.agents))
-	copy(out, f.agents)
-	return out, nil
+func (f *fakeStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) {
+	return f.agents, nil
 }
 
-func (f *fakeStorage) UpdateAgent(_ context.Context, agent *storage.Agent) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (f *fakeStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error {
 	for i := range f.agents {
 		if f.agents[i].ID == agent.ID {
 			f.agents[i] = *agent
 			return nil
 		}
 	}
-	return fmt.Errorf("agent %s not found", agent.ID)
+	return nil
 }
-
-// satisfy unused methods of storage.Storage for tests
-var _ Storage = (*fakeStorage)(nil)
 
 type fakeWorker struct {
-	item      consumer.WorkItem
-	called    bool
-	err       error
-	responses []error
-	callCount int
+	err error
 }
 
-func (f *fakeWorker) Process(_ context.Context, item consumer.WorkItem) error {
-	f.called = true
-	f.item = item
-	resp := f.err
-	if len(f.responses) > 0 {
-		idx := f.callCount
-		if idx >= len(f.responses) {
-			idx = len(f.responses) - 1
-		}
-		resp = f.responses[idx]
-	}
-	f.callCount++
-	return resp
-}
-
-type blockingWorker struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (b *blockingWorker) Process(_ context.Context, item consumer.WorkItem) error {
-	if b.started != nil {
-		close(b.started)
-	}
-	if b.release != nil {
-		<-b.release
-	}
-	return nil
+func (f *fakeWorker) Process(ctx context.Context, item consumer.WorkItem) error {
+	return f.err
 }

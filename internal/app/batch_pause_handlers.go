@@ -6,6 +6,7 @@ import (
 
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 // pauseBatchHandler marks a batch as paused to stop new work from starting.
@@ -48,6 +49,11 @@ func (a *App) pauseBatchHandler(w http.ResponseWriter, r *http.Request) {
 		writeStorageError(a.logger, w, err)
 		return
 	}
+
+	a.logger.Info("batch paused",
+		zap.String("batch_id", batch.ID),
+		zap.String("repository_id", batch.RepositoryID),
+	)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"batch_id":      batch.ID,
@@ -92,6 +98,11 @@ func (a *App) resumeBatchHandler(w http.ResponseWriter, r *http.Request) {
 		writeStorageError(a.logger, w, err)
 		return
 	}
+
+	a.logger.Info("batch resumed",
+		zap.String("batch_id", batch.ID),
+		zap.String("repository_id", batch.RepositoryID),
+	)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"batch_id":      batch.ID,

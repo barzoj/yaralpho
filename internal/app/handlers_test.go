@@ -18,6 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // --- fakes -------------------------------------------------------------------
@@ -268,6 +270,11 @@ func (noopCopilot) StartSession(ctx context.Context, prompt, repoPath string) (s
 
 func newTestApp(t *testing.T, st *handlerTestStorage) *App {
 	t.Helper()
+	return newTestAppWithLogger(t, st, zap.NewNop())
+}
+
+func newTestAppWithLogger(t *testing.T, st *handlerTestStorage, logger *zap.Logger) *App {
+	t.Helper()
 	cfg := fakeConfig{
 		config.PortKey:     "0",
 		config.MongoURIKey: "mongodb://example",
@@ -276,9 +283,31 @@ func newTestApp(t *testing.T, st *handlerTestStorage) *App {
 		config.BdRepoKey:   "/bd",
 	}
 
-	app, err := New(zap.NewNop(), cfg, st, noopTracker{}, noopNotifier{}, noopCopilot{})
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	app, err := New(logger, cfg, st, noopTracker{}, noopNotifier{}, noopCopilot{})
 	require.NoError(t, err)
 	return app
+}
+
+func assertLogField(t *testing.T, entry observer.LoggedEntry, key string, expected any) {
+	t.Helper()
+	for _, f := range entry.Context {
+		if f.Key == key {
+			switch f.Type {
+			case zapcore.StringType:
+				require.Equal(t, expected, f.String)
+			case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
+				require.EqualValues(t, expected, f.Integer)
+			default:
+				require.EqualValues(t, expected, f.Interface)
+			}
+			return
+		}
+	}
+	t.Fatalf("field %s not found", key)
 }
 
 // --- tests -------------------------------------------------------------------
@@ -409,6 +438,31 @@ func TestPauseBatch_InvalidState(t *testing.T) {
 	require.Equal(t, storage.BatchStatusDone, st.batches[batchID].Status)
 }
 
+func TestPauseBatch_Logs(t *testing.T) {
+	st := newHandlerTestStorage()
+	repoID := "repo-1"
+	batchID := "batch-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
+	st.batches[batchID] = storage.Batch{
+		ID:           batchID,
+		RepositoryID: repoID,
+		Status:       storage.BatchStatusPending,
+		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusPending}},
+	}
+	core, obs := observer.New(zap.InfoLevel)
+	app := newTestAppWithLogger(t, st, zap.New(core))
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/pause", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	entries := obs.FilterMessage("batch paused").All()
+	require.Len(t, entries, 1)
+	assertLogField(t, entries[0], "batch_id", batchID)
+	assertLogField(t, entries[0], "repository_id", repoID)
+}
+
 func TestResumeBatch(t *testing.T) {
 	st := newHandlerTestStorage()
 	repoID := "repo-1"
@@ -464,6 +518,31 @@ func TestResumeBatch_InvalidState(t *testing.T) {
 	require.Equal(t, storage.BatchStatusPending, st.batches[batchID].Status)
 }
 
+func TestResumeBatch_Logs(t *testing.T) {
+	st := newHandlerTestStorage()
+	repoID := "repo-1"
+	batchID := "batch-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
+	st.batches[batchID] = storage.Batch{
+		ID:           batchID,
+		RepositoryID: repoID,
+		Status:       storage.BatchStatusPaused,
+		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusPending}},
+	}
+	core, obs := observer.New(zap.InfoLevel)
+	app := newTestAppWithLogger(t, st, zap.New(core))
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/resume", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	entries := obs.FilterMessage("batch resumed").All()
+	require.Len(t, entries, 1)
+	assertLogField(t, entries[0], "batch_id", batchID)
+	assertLogField(t, entries[0], "repository_id", repoID)
+}
+
 func TestRestartFailedBatch(t *testing.T) {
 	st := newHandlerTestStorage()
 	repoID := "repo-1"
@@ -500,6 +579,32 @@ func TestRestartFailedBatch(t *testing.T) {
 	require.Equal(t, storage.ItemStatusPending, updated.Items[1].Status)
 	require.Equal(t, 0, updated.Items[1].Attempts)
 	require.True(t, updated.UpdatedAt.After(now))
+}
+
+func TestRestartFailedBatch_Logs(t *testing.T) {
+	st := newHandlerTestStorage()
+	repoID := "repo-1"
+	batchID := "batch-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
+	st.batches[batchID] = storage.Batch{
+		ID:           batchID,
+		RepositoryID: repoID,
+		Status:       storage.BatchStatusFailed,
+		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusFailed}},
+	}
+	core, obs := observer.New(zap.InfoLevel)
+	app := newTestAppWithLogger(t, st, zap.New(core))
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	entries := obs.FilterMessage("batch restart scheduled").All()
+	require.Len(t, entries, 1)
+	assertLogField(t, entries[0], "batch_id", batchID)
+	assertLogField(t, entries[0], "repository_id", repoID)
+	assertLogField(t, entries[0], "failed_index", 0)
 }
 
 func TestRestartFailedBatch_InvalidState(t *testing.T) {

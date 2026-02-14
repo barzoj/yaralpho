@@ -137,7 +137,7 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		return nil
 	}
 	if s.draining.Load() {
-		s.logger.Debug("scheduler draining; skipping tick")
+		s.logger.Debug("scheduler draining; skipping tick", zap.Bool("draining", true))
 		return nil
 	}
 	if s.store == nil || s.worker == nil {
@@ -155,25 +155,26 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 
 	idleAgent := firstIdleAgent(agents)
 	if idleAgent == nil {
-		s.logger.Debug("no idle agents available; skipping tick")
+		s.logger.Debug("no idle agents available; skipping tick", zap.Int("agents_total", len(agents)))
 		return nil
 	}
 
 	for _, batch := range batches {
+		batchFields := withBatchFields(batch, -1)
 		switch batch.Status {
 		case storage.BatchStatusPaused:
-			s.logger.Debug("batch paused; skipping", zap.String("batch_id", batch.ID))
+			s.logger.Debug("batch paused; skipping", batchFields...)
 			continue
 		case storage.BatchStatusFailed, storage.BatchStatusDone:
 			continue
 		}
 		pendingIdx, hasInProgress := nextPendingIndex(batch.Items)
 		if hasInProgress {
-			s.logger.Debug("batch already in progress; skipping", zap.String("batch_id", batch.ID))
+			s.logger.Debug("batch already in progress; skipping", batchFields...)
 			continue
 		}
 		if pendingIdx == -1 {
-			s.logger.Debug("batch has no pending items; skipping", zap.String("batch_id", batch.ID))
+			s.logger.Debug("batch has no pending items; skipping", batchFields...)
 			continue
 		}
 
@@ -196,7 +197,8 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		}
 
 		work := consumer.WorkItem{BatchID: batch.ID, TaskRef: batch.Items[pendingIdx].Input}
-		s.logger.Debug("dispatching work item", zap.String("batch_id", batch.ID), zap.String("agent_id", claimedAgent.ID), zap.String("task_ref", work.TaskRef))
+		claimFields := append(withBatchFields(batch, pendingIdx), withAgentFields(&claimedAgent)...)
+		s.logger.Info("claiming work item", append(claimFields, zap.String("task_ref", work.TaskRef))...)
 		s.activeWG.Add(1)
 		s.activeRuns.Add(1)
 		defer func() {
@@ -213,11 +215,14 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 			} else {
 				batch.Status = storage.BatchStatusPending
 			}
+			s.logger.Info("work item succeeded", claimFields...)
 		} else {
-			s.logger.Warn("worker failed", zap.Error(workerErr), zap.String("batch_id", batch.ID), zap.String("agent_id", claimedAgent.ID), zap.Int("attempt", pendingItem.Attempts), zap.Int("max_retries", s.maxRetries))
+			attemptFields := append(claimFields, withAttemptFields(pendingItem.Attempts, s.maxRetries)...)
+			s.logger.Warn("worker failed", append(attemptFields, zap.Error(workerErr))...)
 			if pendingItem.Attempts >= s.maxRetries {
 				pendingItem.Status = storage.ItemStatusFailed
 				batch.Status = storage.BatchStatusFailed
+				s.logger.Error("work item failed", append(attemptFields, zap.Error(workerErr))...)
 			} else {
 				pendingItem.Status = storage.ItemStatusPending
 				batch.Status = storage.BatchStatusPending
@@ -281,4 +286,36 @@ func allItemsDone(items []storage.BatchItem) bool {
 		}
 	}
 	return true
+}
+
+// withBatchFields returns standard batch zap fields, including optional item index.
+func withBatchFields(batch storage.Batch, itemIndex int) []zap.Field {
+	fields := []zap.Field{
+		zap.String("batch_id", batch.ID),
+		zap.String("repository_id", batch.RepositoryID),
+	}
+	if itemIndex >= 0 {
+		fields = append(fields, zap.Int("item_index", itemIndex))
+	}
+	return fields
+}
+
+// withAgentFields returns the agent identifier field when present.
+func withAgentFields(agent *storage.Agent) []zap.Field {
+	if agent == nil {
+		return nil
+	}
+	return []zap.Field{zap.String("agent_id", agent.ID)}
+}
+
+// withAttemptFields captures retry attempt metadata.
+func withAttemptFields(attempt, maxRetries int) []zap.Field {
+	fields := []zap.Field{}
+	if attempt > 0 {
+		fields = append(fields, zap.Int("attempt", attempt))
+	}
+	if maxRetries > 0 {
+		fields = append(fields, zap.Int("max_retries", maxRetries))
+	}
+	return fields
 }
