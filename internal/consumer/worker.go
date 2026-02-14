@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,33 +12,23 @@ import (
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
-	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"go.uber.org/zap"
 )
 
-// QueueItem represents a single unit of work pulled by the consumer. Items are
-// encoded as JSON strings before enqueueing to keep the queue dependency-free.
-type QueueItem struct {
+// WorkItem represents a single unit of work selected by the scheduler.
+// It replaces the legacy queue payloads and is invoked directly by the
+// scheduler rather than being dequeued from an in-memory queue.
+type WorkItem struct {
 	BatchID string `json:"batch_id"`
 	TaskRef string `json:"task_ref"`
 }
 
-// EncodeQueueItem serializes a QueueItem for enqueueing.
-func EncodeQueueItem(item QueueItem) (string, error) {
-	b, err := json.Marshal(item)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// Worker consumes queue items and orchestrates task runs via Copilot while
-// persisting progress and emitting notifications.
+// Worker executes scheduler-selected work items and orchestrates task runs via
+// Copilot while persisting progress and emitting notifications.
 type Worker struct {
 	cfg      config.Config
-	queue    queue.Queue
 	tracker  tracker.Tracker
 	copilot  copilot.Client
 	storage  storage.Storage
@@ -54,7 +43,7 @@ type Worker struct {
 
 // NewWorker constructs a Worker with sensible defaults for logger, notifier,
 // clock, and run ID generation.
-func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) *Worker {
+func NewWorker(tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) *Worker {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -67,7 +56,6 @@ func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.
 
 	return &Worker{
 		cfg:      cfg,
-		queue:    q,
 		tracker:  tr,
 		copilot:  cp,
 		storage:  st,
@@ -84,42 +72,13 @@ func NewWorker(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.
 	}
 }
 
-// Run blocks until the queue is closed or the context is cancelled. Errors
-// while handling individual items are logged and processing continues.
-func (w *Worker) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	for {
-		raw, err := w.queue.Dequeue(ctx)
-		if err != nil {
-			if errors.Is(err, queue.ErrClosed) {
-				w.logger.Info("queue closed; consumer exiting")
-				return nil
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			w.logger.Error("dequeue", zap.Error(err))
-			return err
-		}
-
-		if err := w.handleItem(ctx, raw); err != nil {
-			w.logger.Error("process queue item", zap.Error(err))
-		}
-	}
-}
-
-func (w *Worker) handleItem(ctx context.Context, raw string) error {
-	var item QueueItem
-	if err := json.Unmarshal([]byte(raw), &item); err != nil {
-		return fmt.Errorf("decode queue item: %w", err)
-	}
+// Process executes a single work item selected by the scheduler.
+// It replaces the legacy Run+Dequeue loop.
+func (w *Worker) Process(ctx context.Context, item WorkItem) error {
 	item.BatchID = strings.TrimSpace(item.BatchID)
 	item.TaskRef = strings.TrimSpace(item.TaskRef)
 	if item.BatchID == "" || item.TaskRef == "" {
-		return fmt.Errorf("queue item missing batch_id or task_ref")
+		return fmt.Errorf("work item missing batch_id or task_ref")
 	}
 
 	taskName := w.taskTitle(ctx, item.TaskRef)
@@ -152,7 +111,7 @@ func (w *Worker) handleItem(ctx context.Context, raw string) error {
 	return w.handleEpic(ctx, batch, item, runs)
 }
 
-func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, item QueueItem) error {
+func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, item WorkItem) error {
 	retries, hasRetries := w.parseMaxRetries()
 	attempts := 0
 	for {
@@ -181,7 +140,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 	}
 }
 
-func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item QueueItem, runs []storage.TaskRunSummary) error {
+func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item WorkItem, runs []storage.TaskRunSummary) error {
 	retries, hasRetries := w.parseMaxRetries()
 
 	for {

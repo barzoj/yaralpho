@@ -17,8 +17,11 @@ func (c *Client) CreateRepository(ctx context.Context, repo *storage.Repository)
 		return fmt.Errorf("repository is nil")
 	}
 
-	repo.CreatedAt = time.Now().UTC()
-	repo.UpdatedAt = repo.CreatedAt
+	now := time.Now().UTC()
+	if repo.CreatedAt.IsZero() {
+		repo.CreatedAt = now
+	}
+	repo.UpdatedAt = now
 
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()

@@ -18,7 +18,9 @@ func (c *Client) CreateAgent(ctx context.Context, agent *storage.Agent) error {
 	}
 
 	now := time.Now().UTC()
-	agent.CreatedAt = now
+	if agent.CreatedAt.IsZero() {
+		agent.CreatedAt = now
+	}
 	agent.UpdatedAt = now
 	if agent.Status == "" {
 		agent.Status = storage.AgentStatusIdle

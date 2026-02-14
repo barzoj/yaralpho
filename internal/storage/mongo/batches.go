@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/barzoj/yaralpho/internal/storage"
 	"go.mongodb.org/mongo-driver/bson"
@@ -15,6 +16,16 @@ import (
 func (c *Client) CreateBatch(ctx context.Context, batch *storage.Batch) error {
 	if batch == nil {
 		return fmt.Errorf("batch is nil")
+	}
+
+	now := time.Now().UTC()
+	if batch.CreatedAt.IsZero() {
+		batch.CreatedAt = now
+	}
+	batch.UpdatedAt = now
+
+	if batch.Status == "" {
+		batch.Status = storage.BatchStatusPending
 	}
 
 	ctx, cancel := c.withTimeout(ctx)
@@ -31,6 +42,8 @@ func (c *Client) UpdateBatch(ctx context.Context, batch *storage.Batch) error {
 	if batch == nil {
 		return fmt.Errorf("batch is nil")
 	}
+
+	batch.UpdatedAt = time.Now().UTC()
 
 	ctx, cancel := c.withTimeout(ctx)
 	defer cancel()

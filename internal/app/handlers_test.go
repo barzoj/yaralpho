@@ -13,7 +13,6 @@ import (
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
-	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
@@ -192,21 +191,6 @@ func (s *handlerTestStorage) GetBatchProgress(ctx context.Context, batchID strin
 	return storage.BatchProgress{}, mongo.ErrNoDocuments
 }
 
-type handlerTestQueue struct {
-	items  []string
-	closed bool
-}
-
-func (q *handlerTestQueue) Enqueue(item string) error {
-	if q.closed {
-		return queue.ErrClosed
-	}
-	q.items = append(q.items, item)
-	return nil
-}
-func (q *handlerTestQueue) Dequeue(ctx context.Context) (string, error) { return "", queue.ErrClosed }
-func (q *handlerTestQueue) Close()                                      { q.closed = true }
-
 type noopTracker struct{}
 
 func (noopTracker) IsEpic(ctx context.Context, ref string) (bool, error) { return false, nil }
@@ -242,13 +226,9 @@ func (noopCopilot) StartSession(ctx context.Context, prompt, repoPath string) (s
 	return "s", ch, func() {}, nil
 }
 
-type noopConsumer struct{}
-
-func (noopConsumer) Run(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
-
 // --- helpers -----------------------------------------------------------------
 
-func newTestApp(t *testing.T, st *handlerTestStorage, q *handlerTestQueue) *App {
+func newTestApp(t *testing.T, st *handlerTestStorage) *App {
 	t.Helper()
 	cfg := fakeConfig{
 		config.PortKey:     "0",
@@ -258,7 +238,7 @@ func newTestApp(t *testing.T, st *handlerTestStorage, q *handlerTestQueue) *App 
 		config.BdRepoKey:   "/bd",
 	}
 
-	app, err := New(zap.NewNop(), cfg, st, q, noopTracker{}, noopNotifier{}, noopCopilot{}, noopConsumer{})
+	app, err := New(zap.NewNop(), cfg, st, noopTracker{}, noopNotifier{}, noopCopilot{})
 	require.NoError(t, err)
 	return app
 }
@@ -267,10 +247,9 @@ func newTestApp(t *testing.T, st *handlerTestStorage, q *handlerTestQueue) *App 
 
 func TestBatchCreateUnderRepository(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
 	repoID := "repo-1"
 	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Test Repo", Path: "/tmp/repo"}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add?items=T1,T2&session_name=test", bytes.NewBuffer(nil))
 	rec := httptest.NewRecorder()
@@ -284,8 +263,6 @@ func TestBatchCreateUnderRepository(t *testing.T) {
 	require.NotEmpty(t, batchID)
 	require.Equal(t, "pending", resp["status"])
 	require.Equal(t, repoID, resp["repository_id"])
-	require.Len(t, q.items, 0) // no queue interaction
-
 	batch, ok := st.batches[batchID]
 	require.True(t, ok)
 	require.Equal(t, repoID, batch.RepositoryID)
@@ -310,8 +287,7 @@ func TestBatchCreateUnderRepository(t *testing.T) {
 
 func TestBatchCreateMissingRepository(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPost, "/repository/missing/add?items=T1", nil)
 	rec := httptest.NewRecorder()
@@ -323,10 +299,9 @@ func TestBatchCreateMissingRepository(t *testing.T) {
 
 func TestBatchCreateNoItems(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
 	repoID := "repo-1"
 	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Test Repo", Path: "/tmp/repo"}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add", nil)
 	rec := httptest.NewRecorder()
@@ -338,7 +313,6 @@ func TestBatchCreateNoItems(t *testing.T) {
 
 func TestRestartFailedBatch(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
 	repoID := "repo-1"
 	batchID := "batch-1"
 	now := time.Now().Add(-time.Minute).UTC()
@@ -354,7 +328,7 @@ func TestRestartFailedBatch(t *testing.T) {
 			{Input: "second", Status: storage.ItemStatusFailed, Attempts: 2},
 		},
 	}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
 	rec := httptest.NewRecorder()
@@ -377,7 +351,6 @@ func TestRestartFailedBatch(t *testing.T) {
 
 func TestRestartFailedBatch_InvalidState(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
 	repoID := "repo-1"
 	batchID := "batch-1"
 	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
@@ -387,7 +360,7 @@ func TestRestartFailedBatch_InvalidState(t *testing.T) {
 		Status:       storage.BatchStatusPending,
 		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusPending}},
 	}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
 	rec := httptest.NewRecorder()
@@ -398,7 +371,6 @@ func TestRestartFailedBatch_InvalidState(t *testing.T) {
 
 func TestRestartFailedBatch_NoFailedItem(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
 	repoID := "repo-1"
 	batchID := "batch-1"
 	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
@@ -408,7 +380,7 @@ func TestRestartFailedBatch_NoFailedItem(t *testing.T) {
 		Status:       storage.BatchStatusFailed,
 		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusDone}},
 	}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
 	rec := httptest.NewRecorder()
@@ -419,7 +391,6 @@ func TestRestartFailedBatch_NoFailedItem(t *testing.T) {
 
 func TestRestartFailedBatch_RepositoryMismatch(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
 	st.repos["repo-1"] = storage.Repository{ID: "repo-1", Name: "Repo", Path: "/tmp/repo"}
 	st.batches["batch-1"] = storage.Batch{
 		ID:           "batch-1",
@@ -427,7 +398,7 @@ func TestRestartFailedBatch_RepositoryMismatch(t *testing.T) {
 		Status:       storage.BatchStatusFailed,
 		Items:        []storage.BatchItem{{Input: "task", Status: storage.ItemStatusFailed}},
 	}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
 	rec := httptest.NewRecorder()
@@ -438,8 +409,7 @@ func TestRestartFailedBatch_RepositoryMismatch(t *testing.T) {
 
 func TestHandlers_RunDetailEventCap(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	run := storage.TaskRun{
 		ID:        "run-1",
@@ -471,8 +441,7 @@ func TestHandlers_RunDetailEventCap(t *testing.T) {
 
 func TestHandlers_RunEvents(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	run := storage.TaskRun{
 		ID:        "run-1",
@@ -508,8 +477,7 @@ func TestHandlers_RunEvents(t *testing.T) {
 
 func TestHandlers_RunEvents_NotFound(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/runs/does-not-exist/events", nil)
 	rec := httptest.NewRecorder()
@@ -520,8 +488,7 @@ func TestHandlers_RunEvents_NotFound(t *testing.T) {
 
 func TestHandlers_ListRunsIncludesTaskRefAndEventCounts(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 	st.repos["repo-1"] = storage.Repository{ID: "repo-1", Name: "Repo"}
 
 	now := time.Now().UTC()
@@ -581,8 +548,7 @@ func TestHandlers_ListRunsIncludesTaskRefAndEventCounts(t *testing.T) {
 
 func TestHandlers_BatchProgress(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	st.progress["b99"] = storage.BatchProgress{Total: 3, Succeeded: 2, Failed: 1}
 
@@ -600,8 +566,7 @@ func TestHandlers_BatchProgress(t *testing.T) {
 // requestID header is set even when provided from client.
 func TestHandlers_RequestIDMiddleware(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	req.Header.Set("X-Request-ID", "abc123")

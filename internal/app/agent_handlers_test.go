@@ -14,7 +14,7 @@ import (
 
 func TestAgentCreateDefaultsIdle(t *testing.T) {
 	st := newHandlerTestStorage()
-	app := newTestApp(t, st, &handlerTestQueue{})
+	app := newTestApp(t, st)
 
 	body := []byte(`{"name":"worker1","runtime":"codex"}`)
 	req := httptest.NewRequest(http.MethodPost, "/agent", bytes.NewReader(body))
@@ -33,7 +33,7 @@ func TestAgentCreateDefaultsIdle(t *testing.T) {
 }
 
 func TestAgentCreateRejectsInvalidType(t *testing.T) {
-	app := newTestApp(t, newHandlerTestStorage(), &handlerTestQueue{})
+	app := newTestApp(t, newHandlerTestStorage())
 
 	req := httptest.NewRequest(http.MethodPost, "/agent", bytes.NewBufferString(`{"name":"w","runtime":"invalid"}`))
 	rec := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestAgentListAndGet(t *testing.T) {
 	st.agents["a1"] = storage.Agent{ID: "a1", Name: "one", Runtime: "codex", Status: storage.AgentStatusIdle, CreatedAt: now, UpdatedAt: now}
 	st.agents["a2"] = storage.Agent{ID: "a2", Name: "two", Runtime: "copilot", Status: storage.AgentStatusBusy, CreatedAt: now, UpdatedAt: now}
 
-	app := newTestApp(t, st, &handlerTestQueue{})
+	app := newTestApp(t, st)
 
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/agent", nil))
@@ -73,7 +73,7 @@ func TestAgentUpdateBlocksWhenBusy(t *testing.T) {
 	st := newHandlerTestStorage()
 	now := time.Now().UTC()
 	st.agents["a1"] = storage.Agent{ID: "a1", Name: "busy", Runtime: "codex", Status: storage.AgentStatusBusy, CreatedAt: now, UpdatedAt: now}
-	app := newTestApp(t, st, &handlerTestQueue{})
+	app := newTestApp(t, st)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/agent/a1", bytes.NewBufferString(`{"name":"new","runtime":"codex"}`))
@@ -86,7 +86,7 @@ func TestAgentDeleteBlocksWhenBusy(t *testing.T) {
 	st := newHandlerTestStorage()
 	now := time.Now().UTC()
 	st.agents["a1"] = storage.Agent{ID: "a1", Name: "busy", Runtime: "codex", Status: storage.AgentStatusBusy, CreatedAt: now, UpdatedAt: now}
-	app := newTestApp(t, st, &handlerTestQueue{})
+	app := newTestApp(t, st)
 
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/agent/a1", nil))
@@ -98,7 +98,7 @@ func TestAgentUpdateAllowsIdle(t *testing.T) {
 	st := newHandlerTestStorage()
 	now := time.Now().UTC()
 	st.agents["a1"] = storage.Agent{ID: "a1", Name: "idle", Runtime: "codex", Status: storage.AgentStatusIdle, CreatedAt: now, UpdatedAt: now}
-	app := newTestApp(t, st, &handlerTestQueue{})
+	app := newTestApp(t, st)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/agent/a1", bytes.NewBufferString(`{"name":"updated","runtime":"copilot"}`))

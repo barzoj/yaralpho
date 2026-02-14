@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/barzoj/yaralpho/internal/storage"
 	"go.mongodb.org/mongo-driver/bson"
@@ -16,6 +17,10 @@ import (
 func (c *Client) CreateTaskRun(ctx context.Context, run *storage.TaskRun) error {
 	if run == nil {
 		return fmt.Errorf("run is nil")
+	}
+
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now().UTC()
 	}
 
 	ctx, cancel := c.withTimeout(ctx)
@@ -31,6 +36,18 @@ func (c *Client) CreateTaskRun(ctx context.Context, run *storage.TaskRun) error 
 func (c *Client) UpdateTaskRun(ctx context.Context, run *storage.TaskRun) error {
 	if run == nil {
 		return fmt.Errorf("run is nil")
+	}
+
+	if run.FinishedAt == nil && (run.Status == storage.TaskRunStatusSucceeded || run.Status == storage.TaskRunStatusFailed || run.Status == storage.TaskRunStatusStopped) {
+		now := time.Now().UTC()
+		run.FinishedAt = &now
+	}
+
+	if run.RepositoryID == "" && run.BatchID != "" {
+		batch, err := c.GetBatch(ctx, run.BatchID)
+		if err == nil {
+			run.RepositoryID = batch.RepositoryID
+		}
 	}
 
 	ctx, cancel := c.withTimeout(ctx)

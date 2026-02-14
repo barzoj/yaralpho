@@ -21,8 +21,7 @@ import (
 
 func TestRunEventsLiveHandlerRejectsInvalidCursor(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 	app.logger = zap.NewExample()
 
 	st.runs["run-1"] = storage.TaskRun{
@@ -43,8 +42,7 @@ func TestRunEventsLiveHandlerRejectsInvalidCursor(t *testing.T) {
 
 func TestRunEventsLiveHandlerRejectsFutureCursor(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 	app.logger = zap.NewExample()
 
 	st.runs["run-1"] = storage.TaskRun{
@@ -66,8 +64,7 @@ func TestRunEventsLiveHandlerRejectsFutureCursor(t *testing.T) {
 
 func TestRunEventsLiveHandlerStreamsEvents(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	st.runs["run-1"] = storage.TaskRun{
 		ID:        "run-1",
@@ -108,8 +105,7 @@ func TestRunEventsLiveHandlerStreamsEvents(t *testing.T) {
 
 func TestRunEventsLiveHandlerBackfillsFromCursor(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	st.runs["run-1"] = storage.TaskRun{
 		ID:        "run-1",
@@ -196,8 +192,7 @@ func TestRunEventsLiveHandlerBackfillsFromCursor(t *testing.T) {
 
 func TestRunEventsLiveHandlerClosesOnSubscribeError(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	app.eventBus = errBus{}
 	st.runs["run-1"] = storage.TaskRun{
@@ -242,8 +237,7 @@ func TestRunEventsLiveHandlerClosesOnHeartbeatTimeout(t *testing.T) {
 	})
 
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 	app.logger = zap.NewExample()
 
 	st.runs["run-1"] = storage.TaskRun{
@@ -288,8 +282,7 @@ func TestRunEventsLiveHandlerCleansUpOnWriteFailure(t *testing.T) {
 	t.Cleanup(func() { wsWriteJSON = oldWriteJSON })
 
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 	app.logger = zap.NewExample()
 	recBus := newRecordingBus()
 	app.eventBus = recBus

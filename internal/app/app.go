@@ -15,19 +15,12 @@ import (
 	"github.com/barzoj/yaralpho/internal/consumer"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
-	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
 	mongostorage "github.com/barzoj/yaralpho/internal/storage/mongo"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 )
-
-// Consumer abstracts the worker loop so tests can provide a stub and the
-// application can remain interface-driven.
-type Consumer interface {
-	Run(ctx context.Context) error
-}
 
 // BuildOptions controls provider selection at composition time.
 type BuildOptions struct {
@@ -50,9 +43,6 @@ var (
 	newCodexClient = func(logger *zap.Logger) copilot.Client {
 		return copilot.NewCodex(logger)
 	}
-	newWorker = func(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) Consumer {
-		return consumer.NewWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
-	}
 )
 
 // App wires the Ralph Runner dependencies, HTTP router, and background
@@ -62,17 +52,14 @@ type App struct {
 	cfg        config.Config
 	logger     *zap.Logger
 	storage    storage.Storage
-	queue      queue.Queue
 	tracker    tracker.Tracker
 	notifier   notify.Notifier
 	copilot    copilot.Client
-	consumer   Consumer
 	router     *mux.Router
 	server     *http.Server
 	closers    []func(context.Context) error
 	started    uint32
 	reqCounter uint64
-	startOnce  sync.Once
 	wg         sync.WaitGroup
 	eventBus   bus.Bus
 }
@@ -104,17 +91,10 @@ func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config
 	if err != nil {
 		return nil, fmt.Errorf("get mongo db: %w", err)
 	}
-	repoPath, err := cfg.Get(config.RepoPathKey)
-	if err != nil {
-		return nil, fmt.Errorf("get repo path: %w", err)
-	}
-
 	st, err := newStorage(ctx, mongoURI, mongoDB, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init mongo storage: %w", err)
 	}
-
-	q := queue.NewMemoryQueue(logger)
 
 	tr, err := newTracker(cfg, logger)
 	if err != nil {
@@ -131,9 +111,7 @@ func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config
 		return nil, err
 	}
 
-	cons := newWorker(q, tr, cp, st, nt, cfg, repoPath, logger)
-
-	return New(logger, cfg, st, q, tr, nt, cp, cons)
+	return New(logger, cfg, st, tr, nt, cp)
 }
 
 func copilotClientForAgent(logger *zap.Logger, agent string) (copilot.Client, error) {
@@ -149,7 +127,7 @@ func copilotClientForAgent(logger *zap.Logger, agent string) (copilot.Client, er
 
 // New assembles an App from already-constructed interfaces. It is primarily
 // used by tests to supply fakes without touching external systems.
-func New(logger *zap.Logger, cfg config.Config, st storage.Storage, q queue.Queue, tr tracker.Tracker, nt notify.Notifier, cp copilot.Client, cons Consumer) (*App, error) {
+func New(logger *zap.Logger, cfg config.Config, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, cp copilot.Client) (*App, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -159,16 +137,12 @@ func New(logger *zap.Logger, cfg config.Config, st storage.Storage, q queue.Queu
 		return nil, fmt.Errorf("config is required")
 	case st == nil:
 		return nil, fmt.Errorf("storage is required")
-	case q == nil:
-		return nil, fmt.Errorf("queue is required")
 	case tr == nil:
 		return nil, fmt.Errorf("tracker is required")
 	case nt == nil:
 		return nil, fmt.Errorf("notifier is required")
 	case cp == nil:
 		return nil, fmt.Errorf("copilot client is required")
-	case cons == nil:
-		return nil, fmt.Errorf("consumer is required")
 	}
 
 	router := mux.NewRouter()
@@ -176,11 +150,9 @@ func New(logger *zap.Logger, cfg config.Config, st storage.Storage, q queue.Queu
 		cfg:      cfg,
 		logger:   logger,
 		storage:  st,
-		queue:    q,
 		tracker:  tr,
 		notifier: nt,
 		copilot:  cp,
-		consumer: cons,
 		router:   router,
 	}
 
@@ -228,16 +200,6 @@ func (a *App) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 2)
 
-	a.startOnce.Do(func() {
-		a.wg.Add(1)
-		go func() {
-			defer a.wg.Done()
-			if err := a.consumer.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, queue.ErrClosed) {
-				errCh <- err
-			}
-		}()
-	})
-
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -260,7 +222,6 @@ func (a *App) Run(ctx context.Context) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	a.queue.Close()
 	_ = a.server.Shutdown(shutdownCtx)
 	for _, closer := range a.closers {
 		if err := closer(shutdownCtx); err != nil {

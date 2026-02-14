@@ -14,8 +14,7 @@ import (
 
 func TestRunEventsHandlerIncludesRepositoryContext(t *testing.T) {
 	st := newHandlerTestStorage()
-	q := &handlerTestQueue{}
-	app := newTestApp(t, st, q)
+	app := newTestApp(t, st)
 
 	runID := "run-1"
 	repoID := "repo-123"

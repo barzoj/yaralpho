@@ -11,7 +11,6 @@ import (
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
-	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
@@ -41,7 +40,7 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify base",
 	}
 
-	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	nextRun := 0
 	w.newRunID = func() string {
 		nextRun++
@@ -50,8 +49,8 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	now := time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
 
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-1"})
-	require.NoError(t, w.handleItem(ctx, payload))
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"})
+	require.NoError(t, err)
 
 	require.Equal(t, []string{
 		"exec base\n\nWork on task task-1",
@@ -106,7 +105,7 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	nextRun := 0
 	w.newRunID = func() string {
 		nextRun++
@@ -115,8 +114,8 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 	now := time.Date(2026, 2, 8, 15, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
 
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-idle"})
-	require.NoError(t, w.handleItem(ctx, payload))
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-idle"})
+	require.NoError(t, err)
 
 	run := st.runs["run-idle-1"]
 	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
@@ -154,7 +153,7 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify base",
 	}
 
-	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	nextID := 2
 	w.newRunID = func() string {
 		id := fmt.Sprintf("run-%d", nextID)
@@ -163,8 +162,8 @@ func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
 	}
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 13, 0, 0, 0, time.UTC) }
 
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
-	require.NoError(t, w.handleItem(ctx, payload))
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"})
+	require.NoError(t, err)
 
 	require.Equal(t, []string{
 		"exec base\n\nPick first ready task from epic epic-1 and execute",
@@ -230,8 +229,7 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	q := queue.NewMemoryQueue(zap.NewNop())
-	w := NewWorker(q, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	startRun := 1
 	w.newRunID = func() string {
 		id := fmt.Sprintf("run-%d", startRun)
@@ -240,25 +238,9 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 	}
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 22, 0, 0, 0, time.UTC) }
 
-	payload1, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-1"})
-	payload2, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
-	payload3, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-2"})
-	require.NoError(t, q.Enqueue(payload1))
-	require.NoError(t, q.Enqueue(payload2))
-	require.NoError(t, q.Enqueue(payload3))
-	q.Close()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- w.Run(ctx)
-	}()
-
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		require.Fail(t, "worker did not stop")
-	}
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"}))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"}))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-2"}))
 
 	require.Equal(t, []string{
 		"exec\n\nWork on task task-1",
@@ -320,9 +302,8 @@ func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
-	err := w.handleItem(ctx, payload)
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"})
 	require.NoError(t, err)
 
 	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
@@ -349,7 +330,7 @@ func TestWorker_EpicRetriesIncompleteChildren(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	startRun := 10
 	w.newRunID = func() string {
 		id := fmt.Sprintf("run-%d", startRun)
@@ -358,8 +339,7 @@ func TestWorker_EpicRetriesIncompleteChildren(t *testing.T) {
 	}
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 17, 0, 0, 0, time.UTC) }
 
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "epic-1"})
-	require.NoError(t, w.handleItem(ctx, payload))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"}))
 
 	require.Equal(t, []string{
 		"exec\n\nPick first ready task from epic epic-1 and execute",
@@ -381,12 +361,11 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(nil, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 	w.newRunID = func() string { return "run-fail" }
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 14, 0, 0, 0, time.UTC) }
 
-	payload, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-err"})
-	err := w.handleItem(ctx, payload)
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-err"})
 	require.Error(t, err)
 
 	run := st.runs["run-fail"]
@@ -414,18 +393,11 @@ func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	q := queue.NewMemoryQueue(zap.NewNop())
-	w := NewWorker(q, tr, cp, st, nt, cfg, "/repo", zap.NewNop())
-
-	payload1, _ := EncodeQueueItem(QueueItem{BatchID: "b1", TaskRef: "task-1"})
-	payload2, _ := EncodeQueueItem(QueueItem{BatchID: "b2", TaskRef: "task-2"})
-	require.NoError(t, q.Enqueue(payload1))
-	require.NoError(t, q.Enqueue(payload2))
-	q.Close()
+	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- w.Run(ctx)
+		errCh <- w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"})
 	}()
 
 	require.Eventually(t, func() bool {
@@ -435,9 +407,9 @@ func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 
 	close(firstExec)
 
-	require.Eventually(t, func() bool {
-		return len(cp.prompts) == 4
-	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, <-errCh)
+
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b2", TaskRef: "task-2"}))
 
 	require.Equal(t, []string{
 		"exec\n\nWork on task task-1",

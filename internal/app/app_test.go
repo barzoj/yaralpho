@@ -5,14 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
-	"github.com/barzoj/yaralpho/internal/queue"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
@@ -136,19 +134,6 @@ func (t taggedCopilot) StartSession(ctx context.Context, prompt, repoPath string
 	return t.tag, ch, func() {}, nil
 }
 
-type fakeConsumer struct {
-	mu    sync.Mutex
-	calls int
-}
-
-func (f *fakeConsumer) Run(ctx context.Context) error {
-	f.mu.Lock()
-	f.calls++
-	f.mu.Unlock()
-	<-ctx.Done()
-	return ctx.Err()
-}
-
 func TestNewValidatesDependencies(t *testing.T) {
 	_, err := New(nil, nil, nil, nil, nil, nil, nil, nil)
 	require.Error(t, err)
@@ -164,13 +149,11 @@ func TestHealthRoute(t *testing.T) {
 	}
 
 	st := &fakeStorage{}
-	q := queue.NewMemoryQueue(zap.NewNop())
 	tr := &fakeTracker{}
 	nt := fakeNotifier{}
 	cp := fakeCopilot{}
-	cons := &fakeConsumer{}
 
-	a, err := New(zap.NewNop(), cfg, st, q, tr, nt, cp, cons)
+	a, err := New(zap.NewNop(), cfg, st, tr, nt, cp)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -195,13 +178,11 @@ func TestVersionRoute(t *testing.T) {
 	}
 
 	st := &fakeStorage{}
-	q := queue.NewMemoryQueue(zap.NewNop())
 	tr := &fakeTracker{}
 	nt := fakeNotifier{}
 	cp := fakeCopilot{}
-	cons := &fakeConsumer{}
 
-	a, err := New(zap.NewNop(), cfg, st, q, tr, nt, cp, cons)
+	a, err := New(zap.NewNop(), cfg, st, tr, nt, cp)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
@@ -210,45 +191,6 @@ func TestVersionRoute(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"version":"abc123"`)
-}
-
-func TestRunStartsConsumerOnce(t *testing.T) {
-	cfg := fakeConfig{
-		config.PortKey:     "0",
-		config.MongoURIKey: "mongodb://example",
-		config.MongoDBKey:  "db",
-		config.RepoPathKey: "/repo",
-		config.BdRepoKey:   "/repo",
-	}
-
-	st := &fakeStorage{}
-	q := queue.NewMemoryQueue(zap.NewNop())
-	tr := &fakeTracker{}
-	nt := fakeNotifier{}
-	cp := fakeCopilot{}
-	cons := &fakeConsumer{}
-
-	a, err := New(zap.NewNop(), cfg, st, q, tr, nt, cp, cons)
-	require.NoError(t, err)
-
-	a.server.Addr = "127.0.0.1:0"
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
-
-	require.NoError(t, a.Run(ctx))
-
-	cons.mu.Lock()
-	calls := cons.calls
-	cons.mu.Unlock()
-	require.Equal(t, 1, calls)
-	require.True(t, st.closeCalled)
-
-	err = a.Run(context.Background())
-	require.Error(t, err)
 }
 
 func TestBuildWithOptionsSelectsAgent(t *testing.T) {
@@ -265,14 +207,12 @@ func TestBuildWithOptionsSelectsAgent(t *testing.T) {
 	origNewNotifier := newNotifier
 	origNewGitHubClient := newGitHubClient
 	origNewCodexClient := newCodexClient
-	origNewWorker := newWorker
 	t.Cleanup(func() {
 		newStorage = origNewStorage
 		newTracker = origNewTracker
 		newNotifier = origNewNotifier
 		newGitHubClient = origNewGitHubClient
 		newCodexClient = origNewCodexClient
-		newWorker = origNewWorker
 	})
 
 	newStorage = func(ctx context.Context, uri, db string, logger *zap.Logger) (storage.Storage, error) {
@@ -305,12 +245,6 @@ func TestBuildWithOptionsSelectsAgent(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var selected copilot.Client
-			newWorker = func(q queue.Queue, tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt notify.Notifier, cfg config.Config, repoPath string, logger *zap.Logger) Consumer {
-				selected = cp
-				return &fakeConsumer{}
-			}
-
 			a, err := BuildWithOptions(context.Background(), zap.NewNop(), cfg, BuildOptions{Agent: tc.agent})
 			if tc.wantError != "" {
 				require.Error(t, err)
@@ -321,7 +255,7 @@ func TestBuildWithOptionsSelectsAgent(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NotNil(t, a)
-			cp, ok := selected.(taggedCopilot)
+			cp, ok := a.copilot.(taggedCopilot)
 			require.True(t, ok)
 			require.Equal(t, tc.wantTag, cp.tag)
 		})

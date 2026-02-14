@@ -107,7 +107,7 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 			name: repositoriesCollection,
 			coll: c.repositories,
 			models: []mongo.IndexModel{
-				{Keys: bson.D{{Key: "repository_id", Value: 1}}},
+				{Keys: bson.D{{Key: "repository_id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "path", Value: 1}}, Options: options.Index().SetUnique(true)},
 			},
@@ -116,24 +116,29 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 			name: agentsCollection,
 			coll: c.agents,
 			models: []mongo.IndexModel{
-				{Keys: bson.D{{Key: "agent_id", Value: 1}}},
+				{Keys: bson.D{{Key: "agent_id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "runtime", Value: 1}}},
 			},
 		},
 		{
 			name: batchesCollection,
 			coll: c.batches,
 			models: []mongo.IndexModel{
-				{Keys: bson.D{{Key: "batch_id", Value: 1}}},
+				{Keys: bson.D{{Key: "batch_id", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "repository_id", Value: 1}}},
+				{Keys: bson.D{{Key: "repository_id", Value: 1}, {Key: "created_at", Value: -1}}},
 			},
 		},
 		{
 			name: taskRunsCollection,
 			coll: c.taskRuns,
 			models: []mongo.IndexModel{
-				{Keys: bson.D{{Key: "run_id", Value: 1}}},
+				{Keys: bson.D{{Key: "run_id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "batch_id", Value: 1}}},
 				{Keys: bson.D{{Key: "batch_id", Value: 1}, {Key: "status", Value: 1}}},
+				{Keys: bson.D{{Key: "repository_id", Value: 1}}},
+				{Keys: bson.D{{Key: "repository_id", Value: 1}, {Key: "started_at", Value: -1}}},
 			},
 		},
 		{
