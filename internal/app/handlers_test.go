@@ -45,10 +45,23 @@ func newHandlerTestStorage() *handlerTestStorage {
 // repository methods ---------------------------------------------------------
 
 func (s *handlerTestStorage) CreateRepository(ctx context.Context, repo *storage.Repository) error {
+	for _, existing := range s.repos {
+		if existing.Name == repo.Name || existing.Path == repo.Path {
+			return storage.ErrConflict
+		}
+	}
 	s.repos[repo.ID] = *repo
 	return nil
 }
 func (s *handlerTestStorage) UpdateRepository(ctx context.Context, repo *storage.Repository) error {
+	for id, existing := range s.repos {
+		if id == repo.ID {
+			continue
+		}
+		if existing.Name == repo.Name || existing.Path == repo.Path {
+			return storage.ErrConflict
+		}
+	}
 	s.repos[repo.ID] = *repo
 	return nil
 }

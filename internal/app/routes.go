@@ -19,6 +19,11 @@ func (a *App) registerRoutes() {
 	a.router.HandleFunc("/version", a.versionHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/restart", a.restartHandler).Methods(http.MethodPost, http.MethodGet)
 
+	a.router.HandleFunc("/repository", a.createRepositoryHandler).Methods(http.MethodPost)
+	a.router.HandleFunc("/repository", a.listRepositoriesHandler).Methods(http.MethodGet)
+	a.router.HandleFunc("/repository/{id}", a.getRepositoryHandler).Methods(http.MethodGet)
+	a.router.HandleFunc("/repository/{id}", a.updateRepositoryHandler).Methods(http.MethodPut)
+	a.router.HandleFunc("/repository/{id}", a.deleteRepositoryHandler).Methods(http.MethodDelete)
 	a.router.HandleFunc("/repository/{repoid}/add", a.addBatchHandler).Methods(http.MethodPost)
 	a.router.HandleFunc("/repository/{repoid}/batches", a.listRepositoryBatchesHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/repository/{repoid}/batch/{batchid}/restart", a.restartBatchHandler).Methods(http.MethodPut)
