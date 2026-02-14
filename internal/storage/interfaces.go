@@ -24,6 +24,10 @@ type Storage interface {
 	UpdateBatch(ctx context.Context, batch *Batch) error
 	GetBatch(ctx context.Context, batchID string) (*Batch, error)
 	ListBatches(ctx context.Context, limit int64) ([]Batch, error)
+	// ListBatchesByRepository returns batches scoped to a repository, optionally filtered by status.
+	// If status is empty, all batches for the repository are returned. Results should be sorted by
+	// created_at descending and limited when limit > 0.
+	ListBatchesByRepository(ctx context.Context, repositoryID string, status BatchStatus, limit int64) ([]Batch, error)
 
 	CreateTaskRun(ctx context.Context, run *TaskRun) error
 	UpdateTaskRun(ctx context.Context, run *TaskRun) error

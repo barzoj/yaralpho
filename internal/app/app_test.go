@@ -63,6 +63,9 @@ func (f *fakeStorage) GetBatch(ctx context.Context, batchID string) (*storage.Ba
 func (f *fakeStorage) ListBatches(ctx context.Context, limit int64) ([]storage.Batch, error) {
 	return nil, nil
 }
+func (f *fakeStorage) ListBatchesByRepository(ctx context.Context, repositoryID string, status storage.BatchStatus, limit int64) ([]storage.Batch, error) {
+	return nil, nil
+}
 func (f *fakeStorage) CreateTaskRun(ctx context.Context, run *storage.TaskRun) error { return nil }
 func (f *fakeStorage) UpdateTaskRun(ctx context.Context, run *storage.TaskRun) error { return nil }
 func (f *fakeStorage) GetTaskRun(ctx context.Context, runID string) (*storage.TaskRun, error) {

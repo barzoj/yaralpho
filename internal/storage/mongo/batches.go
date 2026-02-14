@@ -121,3 +121,39 @@ func (c *Client) ListBatches(ctx context.Context, limit int64) ([]storage.Batch,
 	}
 	return batches, nil
 }
+
+// ListBatchesByRepository returns batches for a repository with optional status filter.
+func (c *Client) ListBatchesByRepository(ctx context.Context, repositoryID string, status storage.BatchStatus, limit int64) ([]storage.Batch, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	filter := bson.M{"repository_id": repositoryID}
+	if status != "" {
+		filter["status"] = status
+	}
+
+	findOpts := options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}})
+	if limit > 0 {
+		findOpts.SetLimit(limit)
+	}
+
+	cur, err := c.batches.Find(ctx, filter, findOpts)
+	if err != nil {
+		c.logger.Error("list batches by repo", zap.Error(err), zap.String("repository_id", repositoryID))
+		return nil, fmt.Errorf("list batches by repository: %w", err)
+	}
+	defer cur.Close(context.Background())
+
+	batches := make([]storage.Batch, 0)
+	for cur.Next(ctx) {
+		var batch storage.Batch
+		if err := cur.Decode(&batch); err != nil {
+			return nil, fmt.Errorf("decode batch: %w", err)
+		}
+		batches = append(batches, batch)
+	}
+	if err := cur.Err(); err != nil {
+		return nil, fmt.Errorf("iterate batches: %w", err)
+	}
+	return batches, nil
+}

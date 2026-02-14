@@ -92,6 +92,9 @@ func (s *stubStorage) GetBatch(ctx context.Context, batchID string) (*storage.Ba
 func (s *stubStorage) ListBatches(ctx context.Context, limit int64) ([]storage.Batch, error) {
 	return nil, nil
 }
+func (s *stubStorage) ListBatchesByRepository(ctx context.Context, repositoryID string, status storage.BatchStatus, limit int64) ([]storage.Batch, error) {
+	return nil, nil
+}
 func (s *stubStorage) CreateTaskRun(ctx context.Context, run *storage.TaskRun) error {
 	s.runs[run.ID] = *run
 	return nil

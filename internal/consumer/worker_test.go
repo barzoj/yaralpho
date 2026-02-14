@@ -919,6 +919,19 @@ func (f *fakeStorage) ListBatches(ctx context.Context, limit int64) ([]storage.B
 	}
 	return out, nil
 }
+func (f *fakeStorage) ListBatchesByRepository(ctx context.Context, repositoryID string, status storage.BatchStatus, limit int64) ([]storage.Batch, error) {
+	out := make([]storage.Batch, 0)
+	for _, b := range f.batches {
+		if b.RepositoryID != repositoryID {
+			continue
+		}
+		if status != "" && b.Status != status {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
 
 func (f *fakeStorage) CreateTaskRun(ctx context.Context, run *storage.TaskRun) error {
 	f.runs[run.ID] = *run
