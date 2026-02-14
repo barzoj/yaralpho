@@ -62,14 +62,15 @@ func executeTask(
 	if err != nil {
 		finished := now()
 		run := storage.TaskRun{
-			ID:         runID,
-			BatchID:    batch.ID,
-			TaskRef:    runRef,
-			ParentRef:  parentRef,
-			SessionID:  "",
-			StartedAt:  now(),
-			FinishedAt: &finished,
-			Status:     storage.TaskRunStatusFailed,
+			ID:           runID,
+			BatchID:      batch.ID,
+			RepositoryID: batch.RepositoryID,
+			TaskRef:      runRef,
+			ParentRef:    parentRef,
+			SessionID:    "",
+			StartedAt:    now(),
+			FinishedAt:   &finished,
+			Status:       storage.TaskRunStatusFailed,
 		}
 		if createErr := st.CreateTaskRun(ctx, &run); createErr != nil {
 			logger.Error("record failed run", zap.Error(createErr), zap.String("run_id", run.ID))
@@ -82,13 +83,14 @@ func executeTask(
 	defer stop()
 
 	run := storage.TaskRun{
-		ID:        runID,
-		BatchID:   batch.ID,
-		TaskRef:   runRef,
-		ParentRef: parentRef,
-		SessionID: sessionID,
-		StartedAt: now(),
-		Status:    storage.TaskRunStatusRunning,
+		ID:           runID,
+		BatchID:      batch.ID,
+		RepositoryID: batch.RepositoryID,
+		TaskRef:      runRef,
+		ParentRef:    parentRef,
+		SessionID:    sessionID,
+		StartedAt:    now(),
+		Status:       storage.TaskRunStatusRunning,
 	}
 
 	if err := st.CreateTaskRun(ctx, &run); err != nil {

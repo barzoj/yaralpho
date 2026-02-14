@@ -397,6 +397,7 @@ func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
+		defer close(errCh)
 		errCh <- w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"})
 	}()
 

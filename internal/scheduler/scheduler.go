@@ -24,20 +24,26 @@ type Worker interface {
 	Process(ctx context.Context, item consumer.WorkItem) error
 }
 
+const defaultMaxRetries = 5
+
 // Scheduler drives periodic selection of batch items for execution.
 type Scheduler struct {
-	store    Storage
-	worker   Worker
-	logger   *zap.Logger
-	draining atomic.Bool
+	store      Storage
+	worker     Worker
+	logger     *zap.Logger
+	draining   atomic.Bool
+	maxRetries int
 }
 
 // New constructs a Scheduler with the provided dependencies.
-func New(store Storage, worker Worker, logger *zap.Logger) *Scheduler {
+func New(store Storage, worker Worker, logger *zap.Logger, maxRetries int) *Scheduler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Scheduler{store: store, worker: worker, logger: logger}
+	if maxRetries <= 0 {
+		maxRetries = defaultMaxRetries
+	}
+	return &Scheduler{store: store, worker: worker, logger: logger, maxRetries: maxRetries}
 }
 
 // SetDraining toggles the draining flag. When draining, Tick does nothing.
@@ -87,7 +93,8 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 
 		// Claim agent and batch item before dispatching work.
 		batch.Status = storage.BatchStatusInProgress
-		batch.Items[pendingIdx].Status = storage.ItemStatusInProgress
+		pendingItem := &batch.Items[pendingIdx]
+		pendingItem.Status = storage.ItemStatusInProgress
 		if err := s.store.UpdateBatch(ctx, &batch); err != nil {
 			return fmt.Errorf("update batch %s: %w", batch.ID, err)
 		}
@@ -103,17 +110,44 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		}
 
 		work := consumer.WorkItem{BatchID: batch.ID, TaskRef: batch.Items[pendingIdx].Input}
-		if err := s.worker.Process(ctx, work); err != nil {
-			s.logger.Warn("worker failed", zap.Error(err), zap.String("batch_id", batch.ID), zap.String("agent_id", claimedAgent.ID))
-			// revert state so the item can be retried on next tick
-			claimedAgent.Status = storage.AgentStatusIdle
-			_ = s.store.UpdateAgent(ctx, &claimedAgent)
-			batch.Items[pendingIdx].Status = storage.ItemStatusPending
-			batch.Status = storage.BatchStatusPending
-			_ = s.store.UpdateBatch(ctx, &batch)
-			return err
+		workerErr := s.worker.Process(ctx, work)
+
+		pendingItem.Attempts++
+		if workerErr == nil {
+			pendingItem.Status = storage.ItemStatusDone
+			if allItemsDone(batch.Items) {
+				batch.Status = storage.BatchStatusDone
+			} else {
+				batch.Status = storage.BatchStatusPending
+			}
+		} else {
+			s.logger.Warn("worker failed", zap.Error(workerErr), zap.String("batch_id", batch.ID), zap.String("agent_id", claimedAgent.ID), zap.Int("attempt", pendingItem.Attempts), zap.Int("max_retries", s.maxRetries))
+			if pendingItem.Attempts >= s.maxRetries {
+				pendingItem.Status = storage.ItemStatusFailed
+				batch.Status = storage.BatchStatusFailed
+			} else {
+				pendingItem.Status = storage.ItemStatusPending
+				batch.Status = storage.BatchStatusPending
+			}
 		}
 
+		updateBatchErr := s.store.UpdateBatch(ctx, &batch)
+
+		claimedAgent.Status = storage.AgentStatusIdle
+		updateAgentErr := s.store.UpdateAgent(ctx, &claimedAgent)
+		if updateAgentErr != nil {
+			s.logger.Warn("update agent idle", zap.Error(updateAgentErr), zap.String("agent_id", claimedAgent.ID))
+		}
+
+		if updateBatchErr != nil {
+			return fmt.Errorf("update batch %s after completion: %w", batch.ID, updateBatchErr)
+		}
+		if updateAgentErr != nil {
+			return fmt.Errorf("set agent %s idle: %w", claimedAgent.ID, updateAgentErr)
+		}
+		if workerErr != nil {
+			return workerErr
+		}
 		return nil
 	}
 
@@ -145,4 +179,13 @@ func nextPendingIndex(items []storage.BatchItem) (pendingIdx int, hasInProgress 
 		}
 	}
 	return pendingIdx, hasInProgress
+}
+
+func allItemsDone(items []storage.BatchItem) bool {
+	for _, item := range items {
+		if item.Status != storage.ItemStatusDone {
+			return false
+		}
+	}
+	return true
 }

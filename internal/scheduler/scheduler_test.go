@@ -15,7 +15,7 @@ import (
 
 func TestTick_NoBatches(t *testing.T) {
 	st := &fakeStorage{}
-	sched := New(st, &fakeWorker{}, zap.NewNop())
+	sched := New(st, &fakeWorker{}, zap.NewNop(), defaultMaxRetries)
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.Zero(t, st.updateBatchCalls)
@@ -24,7 +24,7 @@ func TestTick_NoBatches(t *testing.T) {
 func TestTick_DrainingSkips(t *testing.T) {
 	st := &fakeStorage{batches: []storage.Batch{{ID: "b1"}}, agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}}}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop())
+	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
 	sched.SetDraining(true)
 
 	require.NoError(t, sched.Tick(context.Background()))
@@ -36,7 +36,7 @@ func TestTick_NoIdleAgents(t *testing.T) {
 		batches: []storage.Batch{{ID: "b1", Items: []storage.BatchItem{{Input: "t1", Status: storage.ItemStatusPending}}, Status: storage.BatchStatusPending}},
 		agents:  []storage.Agent{{ID: "a1", Status: storage.AgentStatusBusy}},
 	}
-	sched := New(st, &fakeWorker{}, zap.NewNop())
+	sched := New(st, &fakeWorker{}, zap.NewNop(), defaultMaxRetries)
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.Equal(t, storage.BatchStatusPending, st.batches[0].Status)
@@ -51,7 +51,7 @@ func TestTick_SkipsPausedAndInProgressBatches(t *testing.T) {
 		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop())
+	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.False(t, worker.called, "no work should be dispatched when batches are ineligible")
@@ -69,7 +69,7 @@ func TestTick_HappyPathClaimsAgentAndItem(t *testing.T) {
 		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop())
+	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
 
 	require.NoError(t, sched.Tick(context.Background()))
 
@@ -77,11 +77,12 @@ func TestTick_HappyPathClaimsAgentAndItem(t *testing.T) {
 	require.Equal(t, consumer.WorkItem{BatchID: "b1", TaskRef: "task-1"}, worker.item)
 
 	b := st.batches[0]
-	require.Equal(t, storage.BatchStatusInProgress, b.Status)
-	require.Equal(t, storage.ItemStatusInProgress, b.Items[0].Status)
+	require.Equal(t, storage.BatchStatusDone, b.Status)
+	require.Equal(t, storage.ItemStatusDone, b.Items[0].Status)
+	require.Equal(t, 1, b.Items[0].Attempts)
 
 	a := st.agents[0]
-	require.Equal(t, storage.AgentStatusBusy, a.Status)
+	require.Equal(t, storage.AgentStatusIdle, a.Status)
 }
 
 func TestTick_RollsBackOnWorkerError(t *testing.T) {
@@ -90,7 +91,7 @@ func TestTick_RollsBackOnWorkerError(t *testing.T) {
 		agents:  []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{err: errors.New("boom")}
-	sched := New(st, worker, zap.NewNop())
+	sched := New(st, worker, zap.NewNop(), 2)
 
 	err := sched.Tick(context.Background())
 	require.Error(t, err)
@@ -98,6 +99,68 @@ func TestTick_RollsBackOnWorkerError(t *testing.T) {
 	b := st.batches[0]
 	require.Equal(t, storage.BatchStatusPending, b.Status)
 	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
+	require.Equal(t, 1, b.Items[0].Attempts)
+	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+}
+
+func TestTick_RetryThenSuccess(t *testing.T) {
+	st := &fakeStorage{
+		batches: []storage.Batch{{
+			ID:     "b1",
+			Status: storage.BatchStatusPending,
+			Items:  []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
+		}},
+		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+	}
+	worker := &fakeWorker{responses: []error{errors.New("first"), nil}}
+	sched := New(st, worker, zap.NewNop(), 2)
+
+	err := sched.Tick(context.Background())
+	require.Error(t, err)
+
+	b := st.batches[0]
+	require.Equal(t, storage.BatchStatusPending, b.Status)
+	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
+	require.Equal(t, 1, b.Items[0].Attempts)
+	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+
+	worker.called = false
+
+	require.NoError(t, sched.Tick(context.Background()))
+	require.Equal(t, 2, worker.callCount)
+
+	b = st.batches[0]
+	require.Equal(t, storage.BatchStatusDone, b.Status)
+	require.Equal(t, storage.ItemStatusDone, b.Items[0].Status)
+	require.Equal(t, 2, b.Items[0].Attempts)
+	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+}
+
+func TestTick_RetryExhausted(t *testing.T) {
+	st := &fakeStorage{
+		batches: []storage.Batch{{
+			ID:     "b1",
+			Status: storage.BatchStatusPending,
+			Items:  []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
+		}},
+		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+	}
+	worker := &fakeWorker{err: errors.New("always fails")}
+	sched := New(st, worker, zap.NewNop(), 2)
+
+	require.Error(t, sched.Tick(context.Background()))
+
+	b := st.batches[0]
+	require.Equal(t, storage.BatchStatusPending, b.Status)
+	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
+	require.Equal(t, 1, b.Items[0].Attempts)
+
+	require.Error(t, sched.Tick(context.Background()))
+
+	b = st.batches[0]
+	require.Equal(t, storage.BatchStatusFailed, b.Status)
+	require.Equal(t, storage.ItemStatusFailed, b.Items[0].Status)
+	require.Equal(t, 2, b.Items[0].Attempts)
 	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
 }
 
@@ -155,13 +218,24 @@ func (f *fakeStorage) UpdateAgent(_ context.Context, agent *storage.Agent) error
 var _ Storage = (*fakeStorage)(nil)
 
 type fakeWorker struct {
-	item   consumer.WorkItem
-	called bool
-	err    error
+	item      consumer.WorkItem
+	called    bool
+	err       error
+	responses []error
+	callCount int
 }
 
 func (f *fakeWorker) Process(_ context.Context, item consumer.WorkItem) error {
 	f.called = true
 	f.item = item
-	return f.err
+	resp := f.err
+	if len(f.responses) > 0 {
+		idx := f.callCount
+		if idx >= len(f.responses) {
+			idx = len(f.responses) - 1
+		}
+		resp = f.responses[idx]
+	}
+	f.callCount++
+	return resp
 }
