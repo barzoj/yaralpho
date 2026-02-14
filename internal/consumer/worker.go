@@ -91,23 +91,7 @@ func (w *Worker) Process(ctx context.Context, item WorkItem) error {
 	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusInProgress)
 	w.notifyTaskEvent(ctx, notify.Event{Type: "task_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: taskName, Status: "running"})
 
-	runs, err := w.storage.ListTaskRuns(ctx, item.BatchID)
-	if err != nil {
-		w.logger.Warn("list task runs", zap.Error(err), zap.String("batch_id", item.BatchID))
-	}
-
-	isEpic, err := w.tracker.IsEpic(ctx, item.TaskRef)
-	if err != nil {
-		_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
-		setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
-		return fmt.Errorf("tracker is-epic: %w", err)
-	}
-
-	if !isEpic {
-		return w.handleSingleTask(ctx, batch, item)
-	}
-
-	return w.handleEpic(ctx, batch, item, runs)
+	return w.handleSingleTask(ctx, batch, item)
 }
 
 func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, item WorkItem) error {
@@ -118,7 +102,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 		w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, item.TaskRef), Status: "in_progress", Attempt: attempts})
 		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
 		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
-		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, "", execInstruction, verifyInstruction)
+		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, execInstruction, verifyInstruction)
 		if err != nil {
 			return err
 		}
@@ -139,69 +123,18 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 	}
 }
 
-func (w *Worker) handleEpic(ctx context.Context, batch *storage.Batch, item WorkItem, runs []storage.TaskRunSummary) error {
-	retries, hasRetries := w.parseMaxRetries()
-
-	for {
-		children, err := w.tracker.ListChildren(ctx, item.TaskRef)
-		if err != nil {
-			_ = w.notifier.NotifyError(ctx, item.BatchID, "", item.TaskRef, err)
-			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusFailed)
-			return fmt.Errorf("tracker list children: %w", err)
-		}
-
-		child, ok := firstAvailableChild(children, runs)
-		if !ok {
-			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusPending)
-			_ = w.notifier.NotifyBatchIdle(ctx, item.BatchID)
-			w.logger.Info("no remaining child tasks for epic", zap.String("epic", item.TaskRef))
-			return nil
-		}
-
-		attempts := 0
-		runRecorded := false
-		for {
-			attempts++
-			w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: child, TaskName: w.taskTitle(ctx, child), ParentTaskRef: item.TaskRef, Status: "in_progress", Attempt: attempts})
-			execInstruction := fmt.Sprintf("Pick first ready task from epic %s and execute", item.TaskRef)
-			verifyInstruction := fmt.Sprintf("Verify task %s", child)
-			verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, child, item.TaskRef, execInstruction, verifyInstruction)
-			if err != nil {
-				return err
-			}
-
-			if agentResp.Status == "failure" {
-				if w.shouldRetry(ctx, batch, item.BatchID, child, agentResp, assistantOutput, attempts, retries, hasRetries) {
-					continue
-				}
-			}
-
-			if verifyStatus == storage.TaskRunStatusSucceeded {
-				if !runRecorded {
-					runs = append(runs, storage.TaskRunSummary{TaskRun: storage.TaskRun{TaskRef: child, Status: verifyStatus}})
-					runRecorded = true
-				}
-				w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: child, TaskName: w.taskTitle(ctx, child), ParentTaskRef: item.TaskRef, Status: "succeeded", Attempt: attempts, Details: formatAgentResponseText(agentResp, output)})
-				break
-			}
-
-			return fmt.Errorf("verification task did not succeed: %s", output)
-		}
-	}
-}
-
-func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, taskRef, parentRef, execInstruction, verifyInstruction string) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
+func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, taskRef, execInstruction, verifyInstruction string) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
 	execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
 	execTask.newRunID = w.newRunID
 	execTask.now = w.now
 
-	status, assistantOutput, finalErr := execTask.Execute(ctx, batch, taskRef, parentRef)
+	status, assistantOutput, finalErr := execTask.Execute(ctx, batch, taskRef)
 	if status != storage.TaskRunStatusSucceeded {
 		return status, AgentStructuredResponse{}, assistantOutput, "", finalErr
 	}
 
 	verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
-	verifyStatus, output, verifyErr := verifyTask.Execute(ctx, batch, taskRef, parentRef)
+	verifyStatus, output, verifyErr := verifyTask.Execute(ctx, batch, taskRef)
 	if verifyErr != nil {
 		w.logger.Warn("verification task execution error", zap.Error(verifyErr), zap.String("task_ref", taskRef))
 		return verifyStatus, AgentStructuredResponse{}, assistantOutput, output, verifyErr
@@ -339,36 +272,6 @@ func isSessionIdleEvent(evt copilot.RawEvent) bool {
 	}
 
 	return strings.EqualFold(eventType, "session.idle")
-}
-
-func firstAvailableChild(children []string, runs []storage.TaskRunSummary) (string, bool) {
-	seen := make(map[string]struct{}, len(runs))
-	for _, r := range runs {
-		if !isRunCompleted(r) {
-			continue
-		}
-		seen[strings.TrimSpace(r.TaskRef)] = struct{}{}
-	}
-
-	for _, child := range children {
-		child = strings.TrimSpace(child)
-		if child == "" {
-			continue
-		}
-		if _, ok := seen[child]; !ok {
-			return child, true
-		}
-	}
-	return "", false
-}
-
-func isRunCompleted(run storage.TaskRunSummary) bool {
-	switch run.Status {
-	case storage.TaskRunStatusSucceeded, storage.TaskRunStatusStopped:
-		return true
-	default:
-		return false
-	}
 }
 
 func buildPrompt(basePrompt, fallback string) string {

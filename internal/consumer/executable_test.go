@@ -11,7 +11,7 @@ import (
 func TestExecutableTaskInterfaceSignature(t *testing.T) {
 	var task ExecutableTask = &fakeExecutableTask{}
 
-	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "batch-1"}, "task-1", "epic-1")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "batch-1"}, "task-1")
 	require.NoError(t, err)
 	require.Equal(t, storage.TaskRunStatusSucceeded, status)
 	require.Empty(t, resp)
@@ -19,10 +19,9 @@ func TestExecutableTaskInterfaceSignature(t *testing.T) {
 
 type fakeExecutableTask struct{}
 
-func (f *fakeExecutableTask) Execute(ctx context.Context, batch *storage.Batch, taskID, epicID string) (storage.TaskRunStatus, string, error) {
+func (f *fakeExecutableTask) Execute(ctx context.Context, batch *storage.Batch, taskID string) (storage.TaskRunStatus, string, error) {
 	_ = ctx
 	_ = batch
 	_ = taskID
-	_ = epicID
 	return storage.TaskRunStatusSucceeded, "", nil
 }

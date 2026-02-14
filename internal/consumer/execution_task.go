@@ -30,7 +30,7 @@ type ExecutionTask struct {
 	newRunID    func() string
 	now         func() time.Time
 	bus         bus.Bus
-	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, prompt string) (storage.TaskRunStatus, string, error)
+	exec        func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, prompt string) (storage.TaskRunStatus, string, error)
 }
 
 // NewExecutionTask constructs an ExecutionTask with sensible defaults for logger,
@@ -64,8 +64,8 @@ func NewExecutionTask(cfg config.Config, tr tracker.Tracker, cp copilot.Client, 
 }
 
 // Execute fetches tracker comments, builds a comment-aware prompt, and delegates
-// execution to executeTask. parentID represents the logical parent task (e.g., epic) when present.
-func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskID, parentID string) (storage.TaskRunStatus, string, error) {
+// execution to executeTask.
+func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskID string) (storage.TaskRunStatus, string, error) {
 	if t.cfg == nil {
 		return storage.TaskRunStatusFailed, "", fmt.Errorf("config is nil")
 	}
@@ -118,6 +118,6 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 		t.bus = sessionEventBus
 	}
 
-	status, messages, err := t.exec(ctx, t.copilot, t.storage, t.tracker, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, parentID, prompt)
+	status, messages, err := t.exec(ctx, t.copilot, t.storage, t.tracker, t.notifier, t.logger, t.repoPath, t.newRunID, t.now, batch, taskID, prompt)
 	return status, messages, err
 }

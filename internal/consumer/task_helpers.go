@@ -44,7 +44,6 @@ func executeTask(
 	now func() time.Time,
 	batch *storage.Batch,
 	runRef,
-	parentRef,
 	prompt string,
 ) (storage.TaskRunStatus, error) {
 	runID := newRunID()
@@ -66,7 +65,6 @@ func executeTask(
 			BatchID:      batch.ID,
 			RepositoryID: batch.RepositoryID,
 			TaskRef:      runRef,
-			ParentRef:    parentRef,
 			SessionID:    "",
 			StartedAt:    now(),
 			FinishedAt:   &finished,
@@ -87,7 +85,6 @@ func executeTask(
 		BatchID:      batch.ID,
 		RepositoryID: batch.RepositoryID,
 		TaskRef:      runRef,
-		ParentRef:    parentRef,
 		SessionID:    sessionID,
 		StartedAt:    now(),
 		Status:       storage.TaskRunStatusRunning,
@@ -180,7 +177,6 @@ func executeTaskWithStructuredOutput(
 	now func() time.Time,
 	batch *storage.Batch,
 	runRef,
-	parentRef,
 	prompt string,
 ) (storage.TaskRunStatus, string, error) {
 	if logger == nil {
@@ -189,7 +185,7 @@ func executeTaskWithStructuredOutput(
 
 	// Capture the run ID up front so we can retrieve the persisted run and its session events after execution.
 	generatedRunID := newRunID()
-	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, parentRef, prompt)
+	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, prompt)
 
 	structuredOutput := ""
 	if st == nil || generatedRunID == "" {
@@ -230,7 +226,6 @@ func executeTaskWithAssistantMessages(
 	now func() time.Time,
 	batch *storage.Batch,
 	runRef,
-	parentRef,
 	prompt string,
 ) (storage.TaskRunStatus, string, error) {
 	if logger == nil {
@@ -238,7 +233,7 @@ func executeTaskWithAssistantMessages(
 	}
 
 	generatedRunID := newRunID()
-	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, parentRef, prompt)
+	status, err := executeTask(ctx, cp, st, tr, nt, logger, repoPath, func() string { return generatedRunID }, now, batch, runRef, prompt)
 
 	if st == nil || generatedRunID == "" {
 		return status, "", err

@@ -18,10 +18,6 @@ type stubTracker struct {
 	title string
 }
 
-func (s stubTracker) IsEpic(ctx context.Context, ref string) (bool, error) { return false, nil }
-func (s stubTracker) ListChildren(ctx context.Context, ref string) ([]string, error) {
-	return nil, nil
-}
 func (s stubTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
 func (s stubTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
 	return nil, nil
@@ -149,7 +145,6 @@ func TestExecuteTaskNotifiesTaskFinishedWithTitle(t *testing.T) {
 		func() time.Time { return time.Date(2026, 2, 12, 0, 0, 0, 0, time.UTC) },
 		batch,
 		"task-1",
-		"",
 		"prompt",
 	)
 

@@ -235,10 +235,6 @@ func (s *handlerTestStorage) GetBatchProgress(ctx context.Context, batchID strin
 
 type noopTracker struct{}
 
-func (noopTracker) IsEpic(ctx context.Context, ref string) (bool, error) { return false, nil }
-func (noopTracker) ListChildren(ctx context.Context, ref string) ([]string, error) {
-	return nil, nil
-}
 func (noopTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
 func (noopTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
 	return nil, nil

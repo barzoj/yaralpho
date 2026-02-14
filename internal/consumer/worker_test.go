@@ -130,96 +130,26 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 	require.True(t, cp.stopped)
 }
 
-func TestWorker_EpicChoosesFirstAvailableChild(t *testing.T) {
-	ctx := context.Background()
-	batch := storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
-
-	st := newFakeStorage()
-	st.batches["b1"] = batch
-	st.runs["old"] = storage.TaskRun{ID: "old", BatchID: "b1", TaskRef: "child-1", Status: storage.TaskRunStatusSucceeded}
-
-	cp := &fakeCopilot{events: closedChan(), sessionID: "s999"}
-
-	tr := &fakeTracker{
-		epics: map[string]bool{"epic-1": true},
-		children: map[string][]string{
-			"epic-1": {"child-1", "child-2", "child-3"},
-		},
-	}
-
-	nt := &fakeNotifier{}
-	cfg := stubConfig{
-		config.ExecutionTaskPromptKey:    "exec base",
-		config.VerificationTaskPromptKey: "verify base",
-	}
-
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
-	nextID := 2
-	w.newRunID = func() string {
-		id := fmt.Sprintf("run-%d", nextID)
-		nextID++
-		return id
-	}
-	w.now = func() time.Time { return time.Date(2026, 2, 8, 13, 0, 0, 0, time.UTC) }
-
-	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"})
-	require.NoError(t, err)
-
-	require.Equal(t, []string{
-		"exec base\n\nPick first ready task from epic epic-1 and execute",
-		"verify base\n\nVerify task child-2",
-		"exec base\n\nPick first ready task from epic epic-1 and execute",
-		"verify base\n\nVerify task child-3",
-	}, cp.prompts)
-
-	run1 := st.runs["run-2"]
-	require.Equal(t, "child-2", run1.TaskRef)
-	require.Equal(t, "epic-1", run1.ParentRef)
-	require.Equal(t, storage.TaskRunStatusSucceeded, run1.Status)
-
-	verifyRun1 := st.runs["run-3"]
-	require.Equal(t, "child-2", verifyRun1.TaskRef)
-	require.Equal(t, "epic-1", verifyRun1.ParentRef)
-	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun1.Status)
-
-	run2 := st.runs["run-4"]
-	require.Equal(t, "child-3", run2.TaskRef)
-	require.Equal(t, "epic-1", run2.ParentRef)
-	require.Equal(t, storage.TaskRunStatusSucceeded, run2.Status)
-
-	verifyRun2 := st.runs["run-5"]
-	require.Equal(t, "child-3", verifyRun2.TaskRef)
-	require.Equal(t, "epic-1", verifyRun2.ParentRef)
-	require.Equal(t, storage.TaskRunStatusSucceeded, verifyRun2.Status)
-	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
-}
-
 func TestWorker_ExecutionListHappyPath(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
 	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
 
-	eventQueue := make([]chan copilot.RawEvent, 0, 8)
-	for i := 0; i < 8; i++ {
+	eventQueue := make([]chan copilot.RawEvent, 0, 6)
+	for i := 0; i < 6; i++ {
 		eventQueue = append(eventQueue, closedChan())
 	}
 
 	cp := &fakeCopilot{
 		eventQueue: eventQueue,
-		sessionIDs: []string{"s1", "s1-verify", "s2", "s2-verify", "s3", "s3-verify", "s4", "s4-verify"},
+		sessionIDs: []string{"s1", "s1-verify", "s2", "s2-verify", "s3", "s3-verify"},
 	}
 
 	tr := &fakeTracker{
-		epics: map[string]bool{"epic-1": true},
-		children: map[string][]string{
-			"epic-1": {"e1", "e2"},
-		},
 		titles: map[string]string{
 			"task-1": "Task One",
-			"epic-1": "Epic One",
-			"e1":     "Epic Child One",
-			"e2":     "Epic Child Two",
 			"task-2": "Task Two",
+			"task-3": "Task Three",
 		},
 	}
 
@@ -239,113 +169,42 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 22, 0, 0, 0, time.UTC) }
 
 	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"}))
-	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"}))
 	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-2"}))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-3"}))
 
 	require.Equal(t, []string{
 		"exec\n\nWork on task task-1",
 		"verify\n\nVerify task task-1",
-		"exec\n\nPick first ready task from epic epic-1 and execute",
-		"verify\n\nVerify task e1",
-		"exec\n\nPick first ready task from epic epic-1 and execute",
-		"verify\n\nVerify task e2",
 		"exec\n\nWork on task task-2",
 		"verify\n\nVerify task task-2",
+		"exec\n\nWork on task task-3",
+		"verify\n\nVerify task task-3",
 	}, cp.prompts)
 
 	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
-	require.Len(t, nt.batchIdle, 1)
-	require.Equal(t, "b1", nt.batchIdle[0])
+	require.Empty(t, nt.batchIdle)
 
-	require.Len(t, nt.events, 14)
+	require.Len(t, nt.events, 12)
 	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "pending"}, nt.events[0])
 	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "running"}, nt.events[1])
 	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "in_progress", Attempt: 1}, nt.events[2])
 	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-1", TaskName: "Task One", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[3])
-	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "epic-1", TaskName: "Epic One", Status: "pending"}, nt.events[4])
-	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "epic-1", TaskName: "Epic One", Status: "running"}, nt.events[5])
-	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "e1", TaskName: "Epic Child One", ParentTaskRef: "epic-1", Status: "in_progress", Attempt: 1}, nt.events[6])
-	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "e1", TaskName: "Epic Child One", ParentTaskRef: "epic-1", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[7])
-	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "e2", TaskName: "Epic Child Two", ParentTaskRef: "epic-1", Status: "in_progress", Attempt: 1}, nt.events[8])
-	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "e2", TaskName: "Epic Child Two", ParentTaskRef: "epic-1", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[9])
-	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "pending"}, nt.events[10])
-	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "running"}, nt.events[11])
-	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "in_progress", Attempt: 1}, nt.events[12])
-	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[13])
+	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "pending"}, nt.events[4])
+	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "running"}, nt.events[5])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "in_progress", Attempt: 1}, nt.events[6])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-2", TaskName: "Task Two", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[7])
+	require.Equal(t, notify.Event{Type: "task_received", BatchID: "b1", TaskRef: "task-3", TaskName: "Task Three", Status: "pending"}, nt.events[8])
+	require.Equal(t, notify.Event{Type: "task_started", BatchID: "b1", TaskRef: "task-3", TaskName: "Task Three", Status: "running"}, nt.events[9])
+	require.Equal(t, notify.Event{Type: "attempt_started", BatchID: "b1", TaskRef: "task-3", TaskName: "Task Three", Status: "in_progress", Attempt: 1}, nt.events[10])
+	require.Equal(t, notify.Event{Type: "verification_succeeded", BatchID: "b1", TaskRef: "task-3", TaskName: "Task Three", Status: "succeeded", Attempt: 1, Details: "Agent response unavailable."}, nt.events[11])
 
-	require.Len(t, nt.finished, 8)
+	require.Len(t, nt.finished, 6)
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-1", taskRef: "task-1", status: "succeeded"}, nt.finished[0])
 	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-2", taskRef: "task-1", status: "succeeded"}, nt.finished[1])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-3", taskRef: "e1", status: "succeeded"}, nt.finished[2])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-4", taskRef: "e1", status: "succeeded"}, nt.finished[3])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-5", taskRef: "e2", status: "succeeded"}, nt.finished[4])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-6", taskRef: "e2", status: "succeeded"}, nt.finished[5])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-7", taskRef: "task-2", status: "succeeded"}, nt.finished[6])
-	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-8", taskRef: "task-2", status: "succeeded"}, nt.finished[7])
-}
-
-func TestWorker_NoRemainingChildrenMarksIdle(t *testing.T) {
-	ctx := context.Background()
-	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
-	st.runs["r1"] = storage.TaskRun{ID: "r1", BatchID: "b1", TaskRef: "child-1", Status: storage.TaskRunStatusSucceeded}
-
-	tr := &fakeTracker{
-		epics:    map[string]bool{"epic-1": true},
-		children: map[string][]string{"epic-1": {"child-1"}},
-	}
-	nt := &fakeNotifier{}
-	cp := &fakeCopilot{events: closedChan(), sessionID: "s1"}
-
-	cfg := stubConfig{
-		config.ExecutionTaskPromptKey:    "exec",
-		config.VerificationTaskPromptKey: "verify",
-	}
-
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
-	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"})
-	require.NoError(t, err)
-
-	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
-	require.Len(t, nt.batchIdle, 1)
-	require.Len(t, st.runs, 1) // no new run created
-}
-
-func TestWorker_EpicRetriesIncompleteChildren(t *testing.T) {
-	ctx := context.Background()
-	st := newFakeStorage()
-	st.batches["b1"] = storage.Batch{ID: "b1", Status: storage.BatchStatusPending}
-	st.runs["failed"] = storage.TaskRun{ID: "failed", BatchID: "b1", TaskRef: "child-1", Status: storage.TaskRunStatusFailed}
-	st.runs["done"] = storage.TaskRun{ID: "done", BatchID: "b1", TaskRef: "child-2", Status: storage.TaskRunStatusSucceeded}
-
-	tr := &fakeTracker{
-		epics:    map[string]bool{"epic-1": true},
-		children: map[string][]string{"epic-1": {"child-1", "child-2"}},
-	}
-	nt := &fakeNotifier{}
-	cp := &fakeCopilot{events: closedChan(), sessionID: "s1"}
-
-	cfg := stubConfig{
-		config.ExecutionTaskPromptKey:    "exec",
-		config.VerificationTaskPromptKey: "verify",
-	}
-
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
-	startRun := 10
-	w.newRunID = func() string {
-		id := fmt.Sprintf("run-%d", startRun)
-		startRun++
-		return id
-	}
-	w.now = func() time.Time { return time.Date(2026, 2, 8, 17, 0, 0, 0, time.UTC) }
-
-	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "epic-1"}))
-
-	require.Equal(t, []string{
-		"exec\n\nPick first ready task from epic epic-1 and execute",
-		"verify\n\nVerify task child-1",
-	}, cp.prompts)
-	require.Equal(t, storage.BatchStatusPending, st.batches["b1"].Status)
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-3", taskRef: "task-2", status: "succeeded"}, nt.finished[2])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-4", taskRef: "task-2", status: "succeeded"}, nt.finished[3])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-5", taskRef: "task-3", status: "succeeded"}, nt.finished[4])
+	require.Equal(t, notifyFinished{batchID: "b1", runID: "run-6", taskRef: "task-3", status: "succeeded"}, nt.finished[5])
 }
 
 func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
@@ -449,7 +308,6 @@ func TestExecuteTask_Success(t *testing.T) {
 		func() time.Time { return now },
 		&batch,
 		"task-1",
-		"epic-1",
 		"prompt",
 	)
 	require.NoError(t, err)
@@ -457,7 +315,6 @@ func TestExecuteTask_Success(t *testing.T) {
 
 	run := st.runs["run-success"]
 	require.Equal(t, "task-1", run.TaskRef)
-	require.Equal(t, "epic-1", run.ParentRef)
 	require.Equal(t, "s-success", run.SessionID)
 	require.Equal(t, storage.TaskRunStatusSucceeded, run.Status)
 	require.Equal(t, &now, run.FinishedAt)
@@ -488,7 +345,6 @@ func TestExecuteTask_StartSessionErrorSetsFailed(t *testing.T) {
 		func() time.Time { return now },
 		&batch,
 		"task-err",
-		"",
 		"prompt",
 	)
 
@@ -523,7 +379,6 @@ func TestExecuteTaskWithStructuredOutput_Success(t *testing.T) {
 		func() time.Time { return now },
 		&batch,
 		"task-structured",
-		"epic-structured",
 		"prompt",
 	)
 	require.NoError(t, err)
@@ -532,7 +387,6 @@ func TestExecuteTaskWithStructuredOutput_Success(t *testing.T) {
 
 	run := st.runs["run-structured"]
 	require.Equal(t, "task-structured", run.TaskRef)
-	require.Equal(t, "epic-structured", run.ParentRef)
 	require.Equal(t, &now, run.FinishedAt)
 }
 
@@ -564,7 +418,6 @@ func TestExecuteTaskWithStructuredOutput_ReturnsLatestAssistantMessage(t *testin
 		func() time.Time { return now },
 		&batch,
 		"task-structured-output",
-		"epic-structured-output",
 		"prompt",
 	)
 	require.NoError(t, err)
@@ -607,7 +460,6 @@ func TestExecuteTask_PublishesSessionEventsToBus(t *testing.T) {
 		func() time.Time { return now },
 		&batch,
 		"task-bus",
-		"",
 		"prompt",
 	)
 	require.NoError(t, err)
@@ -652,7 +504,6 @@ func TestExecuteTask_PublishErrorNotifies(t *testing.T) {
 		func() time.Time { return now },
 		&batch,
 		"task-bus-err",
-		"",
 		"prompt",
 	)
 	require.NoError(t, err)
@@ -691,7 +542,6 @@ func TestExecuteTaskWithAssistantMessages_ReturnsAllAssistantMessages(t *testing
 		func() time.Time { return now },
 		&batch,
 		"task-assistant-messages",
-		"epic-assistant-messages",
 		"prompt",
 	)
 	require.NoError(t, err)
@@ -725,7 +575,6 @@ func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.
 		func() time.Time { return now },
 		&batch,
 		"task-structured-fail",
-		"",
 		"prompt",
 	)
 
@@ -807,31 +656,7 @@ func (f *fakeCopilot) StartSession(ctx context.Context, prompt, repoPath string)
 }
 
 type fakeTracker struct {
-	epics     map[string]bool
-	children  map[string][]string
-	titles    map[string]string
-	isEpicErr error
-	listErr   error
-}
-
-func (f *fakeTracker) IsEpic(ctx context.Context, ref string) (bool, error) {
-	if f.isEpicErr != nil {
-		return false, f.isEpicErr
-	}
-	if f.epics == nil {
-		return false, nil
-	}
-	return f.epics[ref], nil
-}
-
-func (f *fakeTracker) ListChildren(ctx context.Context, ref string) ([]string, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	if f.children == nil {
-		return []string{}, nil
-	}
-	return f.children[ref], nil
+	titles map[string]string
 }
 
 func (f *fakeTracker) AddComment(ctx context.Context, ref string, text string) error {

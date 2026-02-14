@@ -93,10 +93,6 @@ func (f *fakeStorage) Close(ctx context.Context) error {
 
 type fakeTracker struct{}
 
-func (fakeTracker) IsEpic(ctx context.Context, ref string) (bool, error) { return false, nil }
-func (fakeTracker) ListChildren(ctx context.Context, ref string) ([]string, error) {
-	return nil, nil
-}
 func (fakeTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
 func (fakeTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
 	return nil, nil

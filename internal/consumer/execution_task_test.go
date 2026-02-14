@@ -29,18 +29,17 @@ func TestExecutionTaskBuildsPromptWithComments(t *testing.T) {
 	execCalls := 0
 
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "task instruction")
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, prompt string) (storage.TaskRunStatus, string, error) {
 		execCalls++
 		capturedPrompt = prompt
 		require.Equal(t, "/repo", repoPath)
 		require.Equal(t, "task-1", runRef)
-		require.Equal(t, "epic-1", parentRef)
 		require.NotNil(t, newRunID)
 		require.NotNil(t, now)
 		return storage.TaskRunStatusSucceeded, "", nil
 	}
 
-	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b1"}, "task-1", "epic-1")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b1"}, "task-1")
 	require.NoError(t, err)
 	require.Equal(t, storage.TaskRunStatusSucceeded, status)
 	require.Empty(t, resp)
@@ -56,13 +55,13 @@ func TestExecutionTaskWithoutCommentsUsesBasePrompt(t *testing.T) {
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), " /repo ", "   ")
 
 	var prompt string
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, p string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, p string) (storage.TaskRunStatus, string, error) {
 		prompt = p
 		require.Equal(t, "/repo", repoPath)
 		return storage.TaskRunStatusSucceeded, "", nil
 	}
 
-	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b2"}, "task-2", "")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b2"}, "task-2")
 	require.NoError(t, err)
 	require.Equal(t, storage.TaskRunStatusSucceeded, status)
 	require.Empty(t, resp)
@@ -76,12 +75,12 @@ func TestExecutionTaskPropagatesFetchError(t *testing.T) {
 	task := NewExecutionTask(cfg, tr, nil, nil, notify.Noop{}, zap.NewNop(), "/repo", "base instruction")
 
 	called := false
-	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, parentRef, prompt string) (storage.TaskRunStatus, string, error) {
+	task.exec = func(ctx context.Context, cp copilot.Client, st storage.Storage, tr tracker.Tracker, nt notify.Notifier, logger *zap.Logger, repoPath string, newRunID func() string, now func() time.Time, batch *storage.Batch, runRef, prompt string) (storage.TaskRunStatus, string, error) {
 		called = true
 		return storage.TaskRunStatusSucceeded, "", nil
 	}
 
-	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b3"}, "task-3", "")
+	status, resp, err := task.Execute(context.Background(), &storage.Batch{ID: "b3"}, "task-3")
 	require.Error(t, err)
 	require.ErrorContains(t, err, "fetch tracker comments")
 	require.Equal(t, storage.TaskRunStatusFailed, status)
@@ -94,14 +93,6 @@ type stubExecutionTracker struct {
 	comments []tracker.Comment
 	err      error
 	refs     []string
-}
-
-func (s *stubExecutionTracker) IsEpic(ctx context.Context, ref string) (bool, error) {
-	return false, nil
-}
-
-func (s *stubExecutionTracker) ListChildren(ctx context.Context, ref string) ([]string, error) {
-	return nil, nil
 }
 
 func (s *stubExecutionTracker) AddComment(ctx context.Context, ref string, text string) error {

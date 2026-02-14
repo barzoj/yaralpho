@@ -77,7 +77,6 @@ type TaskRun struct {
 	BatchID      string        `json:"batch_id" bson:"batch_id"`
 	RepositoryID string        `json:"repository_id" bson:"repository_id"`
 	TaskRef      string        `json:"task_ref" bson:"task_ref"`
-	ParentRef    string        `json:"parent_ref,omitempty" bson:"parent_ref,omitempty"`
 	SessionID    string        `json:"session_id" bson:"session_id"`
 	StartedAt    time.Time     `json:"started_at" bson:"started_at"`
 	FinishedAt   *time.Time    `json:"finished_at,omitempty" bson:"finished_at,omitempty"`
