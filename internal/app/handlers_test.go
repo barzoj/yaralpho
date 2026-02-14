@@ -336,6 +336,106 @@ func TestBatchCreateNoItems(t *testing.T) {
 	require.Empty(t, st.batches)
 }
 
+func TestRestartFailedBatch(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	repoID := "repo-1"
+	batchID := "batch-1"
+	now := time.Now().Add(-time.Minute).UTC()
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
+	st.batches[batchID] = storage.Batch{
+		ID:           batchID,
+		RepositoryID: repoID,
+		Status:       storage.BatchStatusFailed,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Items: []storage.BatchItem{
+			{Input: "first", Status: string(storage.ItemStatusDone), Attempts: 1},
+			{Input: "second", Status: string(storage.ItemStatusFailed), Attempts: 2},
+		},
+	}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, batchID, resp["batch_id"])
+	require.Equal(t, repoID, resp["repository_id"])
+	require.Equal(t, string(storage.BatchStatusPending), resp["status"])
+
+	updated := st.batches[batchID]
+	require.Equal(t, storage.BatchStatusPending, updated.Status)
+	require.Equal(t, string(storage.ItemStatusPending), updated.Items[1].Status)
+	require.Equal(t, 0, updated.Items[1].Attempts)
+	require.True(t, updated.UpdatedAt.After(now))
+}
+
+func TestRestartFailedBatch_InvalidState(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	repoID := "repo-1"
+	batchID := "batch-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
+	st.batches[batchID] = storage.Batch{
+		ID:           batchID,
+		RepositoryID: repoID,
+		Status:       storage.BatchStatusPending,
+		Items:        []storage.BatchItem{{Input: "task", Status: string(storage.ItemStatusPending)}},
+	}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestRestartFailedBatch_NoFailedItem(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	repoID := "repo-1"
+	batchID := "batch-1"
+	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Repo", Path: "/tmp/repo"}
+	st.batches[batchID] = storage.Batch{
+		ID:           batchID,
+		RepositoryID: repoID,
+		Status:       storage.BatchStatusFailed,
+		Items:        []storage.BatchItem{{Input: "task", Status: string(storage.ItemStatusDone)}},
+	}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestRestartFailedBatch_RepositoryMismatch(t *testing.T) {
+	st := newHandlerTestStorage()
+	q := &handlerTestQueue{}
+	st.repos["repo-1"] = storage.Repository{ID: "repo-1", Name: "Repo", Path: "/tmp/repo"}
+	st.batches["batch-1"] = storage.Batch{
+		ID:           "batch-1",
+		RepositoryID: "repo-2",
+		Status:       storage.BatchStatusFailed,
+		Items:        []storage.BatchItem{{Input: "task", Status: string(storage.ItemStatusFailed)}},
+	}
+	app := newTestApp(t, st, q)
+
+	req := httptest.NewRequest(http.MethodPut, "/repository/repo-1/batch/batch-1/restart", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestHandlers_RunDetailEventCap(t *testing.T) {
 	st := newHandlerTestStorage()
 	q := &handlerTestQueue{}
