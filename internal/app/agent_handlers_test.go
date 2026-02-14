@@ -43,6 +43,20 @@ func TestAgentCreateRejectsInvalidType(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "invalid agent type")
 }
 
+func TestAgentCreateRejectsDuplicateName(t *testing.T) {
+	st := newHandlerTestStorage()
+	now := time.Now().UTC()
+	st.agents["a1"] = storage.Agent{ID: "a1", Name: "dup", Runtime: "codex", Status: storage.AgentStatusIdle, CreatedAt: now, UpdatedAt: now}
+	app := newTestApp(t, st)
+
+	req := httptest.NewRequest(http.MethodPost, "/agent", bytes.NewBufferString(`{"name":"dup","runtime":"copilot"}`))
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Contains(t, rec.Body.String(), "agent already exists")
+}
+
 func TestAgentListAndGet(t *testing.T) {
 	st := newHandlerTestStorage()
 	now := time.Now().UTC()
@@ -111,4 +125,19 @@ func TestAgentUpdateAllowsIdle(t *testing.T) {
 	require.Equal(t, "updated", agent.Name)
 	require.Equal(t, "copilot", agent.Runtime)
 	require.Equal(t, storage.AgentStatusIdle, agent.Status)
+}
+
+func TestAgentUpdateRejectsDuplicateName(t *testing.T) {
+	st := newHandlerTestStorage()
+	now := time.Now().UTC()
+	st.agents["a1"] = storage.Agent{ID: "a1", Name: "first", Runtime: "codex", Status: storage.AgentStatusIdle, CreatedAt: now, UpdatedAt: now}
+	st.agents["a2"] = storage.Agent{ID: "a2", Name: "second", Runtime: "copilot", Status: storage.AgentStatusIdle, CreatedAt: now, UpdatedAt: now}
+	app := newTestApp(t, st)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/agent/a1", bytes.NewBufferString(`{"name":"second","runtime":"codex"}`))
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Contains(t, rec.Body.String(), "agent already exists")
 }

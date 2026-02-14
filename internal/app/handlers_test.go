@@ -95,10 +95,23 @@ func (s *handlerTestStorage) RepositoryHasActiveBatches(ctx context.Context, id 
 // agent methods -------------------------------------------------------------
 
 func (s *handlerTestStorage) CreateAgent(ctx context.Context, agent *storage.Agent) error {
+	for _, existing := range s.agents {
+		if existing.Name == agent.Name {
+			return storage.ErrConflict
+		}
+	}
 	s.agents[agent.ID] = *agent
 	return nil
 }
 func (s *handlerTestStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error {
+	for id, existing := range s.agents {
+		if id == agent.ID {
+			continue
+		}
+		if existing.Name == agent.Name {
+			return storage.ErrConflict
+		}
+	}
 	s.agents[agent.ID] = *agent
 	return nil
 }
