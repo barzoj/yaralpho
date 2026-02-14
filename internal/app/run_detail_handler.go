@@ -35,6 +35,9 @@ func (a *App) runDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run":               run,
+		"repository_id":     run.RepositoryID,
+		"batch_id":          run.BatchID,
+		"session_id":        run.SessionID,
 		"events":            events,
 		"events_truncated":  truncated,
 		"event_limit_used":  limit,
