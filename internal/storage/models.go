@@ -58,6 +58,7 @@ type TaskRun struct {
 	BatchID      string        `json:"batch_id" bson:"batch_id"`
 	RepositoryID string        `json:"repository_id" bson:"repository_id"`
 	TaskRef      string        `json:"task_ref" bson:"task_ref"`
+	EpicRef      string        `json:"epic_ref,omitempty" bson:"epic_ref,omitempty"`
 	ParentRef    string        `json:"parent_ref,omitempty" bson:"parent_ref,omitempty"`
 	SessionID    string        `json:"session_id" bson:"session_id"`
 	StartedAt    time.Time     `json:"started_at" bson:"started_at"`
@@ -70,6 +71,24 @@ type TaskRun struct {
 type TaskRunSummary struct {
 	TaskRun     `bson:",inline"`
 	TotalEvents int64 `json:"total_events" bson:"total_events"`
+}
+
+// AgentStatus captures runtime availability of an agent.
+type AgentStatus string
+
+const (
+	AgentStatusIdle AgentStatus = "idle"
+	AgentStatusBusy AgentStatus = "busy"
+)
+
+// Agent represents a runtime worker that can execute tasks (codex or copilot).
+type Agent struct {
+	ID        string      `json:"agent_id" bson:"agent_id"`
+	Name      string      `json:"name" bson:"name"`
+	Type      string      `json:"type" bson:"type"`
+	Status    AgentStatus `json:"status" bson:"status"`
+	CreatedAt time.Time   `json:"created_at" bson:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at" bson:"updated_at"`
 }
 
 // RunResult captures optional outputs from a completed task run.

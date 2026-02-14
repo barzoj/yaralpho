@@ -28,6 +28,8 @@ type handlerTestStorage struct {
 	runs     map[string]storage.TaskRun
 	events   map[string][]storage.SessionEvent
 	progress map[string]storage.BatchProgress
+	repos    map[string]storage.Repository
+	agents   map[string]storage.Agent
 }
 
 func newHandlerTestStorage() *handlerTestStorage {
@@ -36,7 +38,75 @@ func newHandlerTestStorage() *handlerTestStorage {
 		runs:     make(map[string]storage.TaskRun),
 		events:   make(map[string][]storage.SessionEvent),
 		progress: make(map[string]storage.BatchProgress),
+		repos:    make(map[string]storage.Repository),
+		agents:   make(map[string]storage.Agent),
 	}
+}
+
+// repository methods ---------------------------------------------------------
+
+func (s *handlerTestStorage) CreateRepository(ctx context.Context, repo *storage.Repository) error {
+	s.repos[repo.ID] = *repo
+	return nil
+}
+func (s *handlerTestStorage) UpdateRepository(ctx context.Context, repo *storage.Repository) error {
+	s.repos[repo.ID] = *repo
+	return nil
+}
+func (s *handlerTestStorage) GetRepository(ctx context.Context, id string) (*storage.Repository, error) {
+	r, ok := s.repos[id]
+	if !ok {
+		return nil, mongo.ErrNoDocuments
+	}
+	return &r, nil
+}
+func (s *handlerTestStorage) ListRepositories(ctx context.Context) ([]storage.Repository, error) {
+	out := make([]storage.Repository, 0, len(s.repos))
+	for _, r := range s.repos {
+		out = append(out, r)
+	}
+	return out, nil
+}
+func (s *handlerTestStorage) DeleteRepository(ctx context.Context, id string) error {
+	delete(s.repos, id)
+	return nil
+}
+func (s *handlerTestStorage) RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error) {
+	for _, b := range s.batches {
+		if b.RepositoryID == id && b.Status != storage.BatchStatusDone && b.Status != storage.BatchStatusFailed {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// agent methods -------------------------------------------------------------
+
+func (s *handlerTestStorage) CreateAgent(ctx context.Context, agent *storage.Agent) error {
+	s.agents[agent.ID] = *agent
+	return nil
+}
+func (s *handlerTestStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error {
+	s.agents[agent.ID] = *agent
+	return nil
+}
+func (s *handlerTestStorage) GetAgent(ctx context.Context, id string) (*storage.Agent, error) {
+	a, ok := s.agents[id]
+	if !ok {
+		return nil, mongo.ErrNoDocuments
+	}
+	return &a, nil
+}
+func (s *handlerTestStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) {
+	out := make([]storage.Agent, 0, len(s.agents))
+	for _, a := range s.agents {
+		out = append(out, a)
+	}
+	return out, nil
+}
+func (s *handlerTestStorage) DeleteAgent(ctx context.Context, id string) error {
+	delete(s.agents, id)
+	return nil
 }
 
 func (s *handlerTestStorage) CreateBatch(ctx context.Context, batch *storage.Batch) error {
@@ -97,6 +167,15 @@ func (s *handlerTestStorage) ListTaskRuns(ctx context.Context, batchID string) (
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].StartedAt.After(out[j].StartedAt)
 	})
+	return out, nil
+}
+func (s *handlerTestStorage) ListTaskRunsByRepository(ctx context.Context, repositoryID string) ([]storage.TaskRunSummary, error) {
+	out := []storage.TaskRunSummary{}
+	for _, r := range s.runs {
+		if r.RepositoryID == repositoryID {
+			out = append(out, storage.TaskRunSummary{TaskRun: r})
+		}
+	}
 	return out, nil
 }
 func (s *handlerTestStorage) InsertSessionEvent(ctx context.Context, event *storage.SessionEvent) error {

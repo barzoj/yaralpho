@@ -10,6 +10,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
@@ -58,6 +59,31 @@ func newStubStorage() *stubStorage {
 	return &stubStorage{runs: make(map[string]storage.TaskRun)}
 }
 
+func (s *stubStorage) CreateRepository(ctx context.Context, repo *storage.Repository) error {
+	return nil
+}
+func (s *stubStorage) UpdateRepository(ctx context.Context, repo *storage.Repository) error {
+	return nil
+}
+func (s *stubStorage) GetRepository(ctx context.Context, id string) (*storage.Repository, error) {
+	return nil, mongo.ErrNoDocuments
+}
+func (s *stubStorage) ListRepositories(ctx context.Context) ([]storage.Repository, error) {
+	return nil, nil
+}
+func (s *stubStorage) DeleteRepository(ctx context.Context, id string) error { return nil }
+func (s *stubStorage) RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error) {
+	return false, nil
+}
+
+func (s *stubStorage) CreateAgent(ctx context.Context, agent *storage.Agent) error { return nil }
+func (s *stubStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error { return nil }
+func (s *stubStorage) GetAgent(ctx context.Context, id string) (*storage.Agent, error) {
+	return nil, mongo.ErrNoDocuments
+}
+func (s *stubStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) { return nil, nil }
+func (s *stubStorage) DeleteAgent(ctx context.Context, id string) error        { return nil }
+
 func (s *stubStorage) CreateBatch(ctx context.Context, batch *storage.Batch) error { return nil }
 func (s *stubStorage) UpdateBatch(ctx context.Context, batch *storage.Batch) error { return nil }
 func (s *stubStorage) GetBatch(ctx context.Context, batchID string) (*storage.Batch, error) {
@@ -81,7 +107,12 @@ func (s *stubStorage) GetTaskRun(ctx context.Context, runID string) (*storage.Ta
 func (s *stubStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRunSummary, error) {
 	return nil, nil
 }
-func (s *stubStorage) InsertSessionEvent(ctx context.Context, event *storage.SessionEvent) error { return nil }
+func (s *stubStorage) ListTaskRunsByRepository(ctx context.Context, repositoryID string) ([]storage.TaskRunSummary, error) {
+	return nil, nil
+}
+func (s *stubStorage) InsertSessionEvent(ctx context.Context, event *storage.SessionEvent) error {
+	return nil
+}
 func (s *stubStorage) ListSessionEvents(ctx context.Context, sessionID string) ([]storage.SessionEvent, error) {
 	return nil, nil
 }

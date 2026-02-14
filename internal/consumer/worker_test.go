@@ -890,6 +890,36 @@ func newFakeStorage() *fakeStorage {
 	}
 }
 
+func (f *fakeStorage) CreateRepository(ctx context.Context, repo *storage.Repository) error {
+	return nil
+}
+func (f *fakeStorage) UpdateRepository(ctx context.Context, repo *storage.Repository) error {
+	return nil
+}
+func (f *fakeStorage) GetRepository(ctx context.Context, id string) (*storage.Repository, error) {
+	return nil, errors.New("not found")
+}
+func (f *fakeStorage) ListRepositories(ctx context.Context) ([]storage.Repository, error) {
+	return nil, nil
+}
+func (f *fakeStorage) DeleteRepository(ctx context.Context, id string) error { return nil }
+func (f *fakeStorage) RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error) {
+	for _, b := range f.batches {
+		if b.RepositoryID == id && b.Status != storage.BatchStatusDone && b.Status != storage.BatchStatusFailed {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeStorage) CreateAgent(ctx context.Context, agent *storage.Agent) error { return nil }
+func (f *fakeStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error { return nil }
+func (f *fakeStorage) GetAgent(ctx context.Context, id string) (*storage.Agent, error) {
+	return nil, errors.New("not found")
+}
+func (f *fakeStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) { return nil, nil }
+func (f *fakeStorage) DeleteAgent(ctx context.Context, id string) error        { return nil }
+
 func (f *fakeStorage) CreateBatch(ctx context.Context, batch *storage.Batch) error {
 	f.batches[batch.ID] = *batch
 	return nil
@@ -946,6 +976,15 @@ func (f *fakeStorage) ListTaskRuns(ctx context.Context, batchID string) ([]stora
 				}
 			}
 			out = append(out, storage.TaskRunSummary{TaskRun: r, TotalEvents: total})
+		}
+	}
+	return out, nil
+}
+func (f *fakeStorage) ListTaskRunsByRepository(ctx context.Context, repositoryID string) ([]storage.TaskRunSummary, error) {
+	out := []storage.TaskRunSummary{}
+	for _, r := range f.runs {
+		if r.RepositoryID == repositoryID {
+			out = append(out, storage.TaskRunSummary{TaskRun: r})
 		}
 	}
 	return out, nil

@@ -21,6 +21,8 @@ type Client struct {
 	batches       *mongo.Collection
 	taskRuns      *mongo.Collection
 	sessionEvents *mongo.Collection
+	repositories  *mongo.Collection
+	agents        *mongo.Collection
 	logger        *zap.Logger
 	timeout       time.Duration
 }
@@ -54,6 +56,8 @@ func New(ctx context.Context, uri, dbName string, logger *zap.Logger) (*Client, 
 		batches:       db.Collection(batchesCollection),
 		taskRuns:      db.Collection(taskRunsCollection),
 		sessionEvents: db.Collection(sessionEventsCollection),
+		repositories:  db.Collection(repositoriesCollection),
+		agents:        db.Collection(agentsCollection),
 		logger:        logger,
 		timeout:       defaultTimeout,
 	}
@@ -85,6 +89,10 @@ func (c *Client) withTimeout(ctx context.Context) (context.Context, context.Canc
 	return context.WithTimeout(ctx, c.timeout)
 }
 
+func optionsFindByCreatedDesc() *options.FindOptions {
+	return options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}})
+}
+
 // ensureIndexes creates non-unique indexes needed by the storage interface.
 func (c *Client) ensureIndexes(ctx context.Context) error {
 	ctx, cancel := c.withTimeout(ctx)
@@ -95,6 +103,23 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		coll   *mongo.Collection
 		models []mongo.IndexModel
 	}{
+		{
+			name: repositoriesCollection,
+			coll: c.repositories,
+			models: []mongo.IndexModel{
+				{Keys: bson.D{{Key: "repository_id", Value: 1}}},
+				{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "path", Value: 1}}, Options: options.Index().SetUnique(true)},
+			},
+		},
+		{
+			name: agentsCollection,
+			coll: c.agents,
+			models: []mongo.IndexModel{
+				{Keys: bson.D{{Key: "agent_id", Value: 1}}},
+				{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
+			},
+		},
 		{
 			name: batchesCollection,
 			coll: c.batches,

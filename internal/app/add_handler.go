@@ -46,9 +46,12 @@ func (a *App) addHandler(w http.ResponseWriter, r *http.Request) {
 	batch := storage.Batch{
 		ID:          batchID,
 		CreatedAt:   now,
-		InputItems:  items,
+		Items:       make([]storage.BatchItem, 0, len(items)),
 		Status:      storage.BatchStatusCreated,
 		SessionName: sessionName,
+	}
+	for _, it := range items {
+		batch.Items = append(batch.Items, storage.BatchItem{Input: it, Status: string(storage.BatchStatusCreated), Attempts: 0})
 	}
 
 	if err := a.storage.CreateBatch(r.Context(), &batch); err != nil {

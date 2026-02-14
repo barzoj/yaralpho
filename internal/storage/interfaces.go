@@ -13,6 +13,12 @@ type Storage interface {
 	DeleteRepository(ctx context.Context, id string) error
 	RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error)
 
+	CreateAgent(ctx context.Context, agent *Agent) error
+	UpdateAgent(ctx context.Context, agent *Agent) error
+	GetAgent(ctx context.Context, id string) (*Agent, error)
+	ListAgents(ctx context.Context) ([]Agent, error)
+	DeleteAgent(ctx context.Context, id string) error
+
 	CreateBatch(ctx context.Context, batch *Batch) error
 	UpdateBatch(ctx context.Context, batch *Batch) error
 	GetBatch(ctx context.Context, batchID string) (*Batch, error)

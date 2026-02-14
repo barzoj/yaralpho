@@ -16,6 +16,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
@@ -32,6 +33,31 @@ type fakeStorage struct {
 	closeCalled bool
 }
 
+func (f *fakeStorage) CreateRepository(ctx context.Context, repo *storage.Repository) error {
+	return nil
+}
+func (f *fakeStorage) UpdateRepository(ctx context.Context, repo *storage.Repository) error {
+	return nil
+}
+func (f *fakeStorage) GetRepository(ctx context.Context, id string) (*storage.Repository, error) {
+	return nil, mongo.ErrNoDocuments
+}
+func (f *fakeStorage) ListRepositories(ctx context.Context) ([]storage.Repository, error) {
+	return nil, nil
+}
+func (f *fakeStorage) DeleteRepository(ctx context.Context, id string) error { return nil }
+func (f *fakeStorage) RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeStorage) CreateAgent(ctx context.Context, agent *storage.Agent) error { return nil }
+func (f *fakeStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error { return nil }
+func (f *fakeStorage) GetAgent(ctx context.Context, id string) (*storage.Agent, error) {
+	return nil, mongo.ErrNoDocuments
+}
+func (f *fakeStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) { return nil, nil }
+func (f *fakeStorage) DeleteAgent(ctx context.Context, id string) error        { return nil }
+
 func (f *fakeStorage) CreateBatch(ctx context.Context, batch *storage.Batch) error { return nil }
 func (f *fakeStorage) UpdateBatch(ctx context.Context, batch *storage.Batch) error { return nil }
 func (f *fakeStorage) GetBatch(ctx context.Context, batchID string) (*storage.Batch, error) {
@@ -46,6 +72,9 @@ func (f *fakeStorage) GetTaskRun(ctx context.Context, runID string) (*storage.Ta
 	return nil, nil
 }
 func (f *fakeStorage) ListTaskRuns(ctx context.Context, batchID string) ([]storage.TaskRunSummary, error) {
+	return nil, nil
+}
+func (f *fakeStorage) ListTaskRunsByRepository(ctx context.Context, repositoryID string) ([]storage.TaskRunSummary, error) {
 	return nil, nil
 }
 func (f *fakeStorage) InsertSessionEvent(ctx context.Context, event *storage.SessionEvent) error {

@@ -115,6 +115,50 @@ func (c *Client) ListTaskRuns(ctx context.Context, batchID string) ([]storage.Ta
 	return summaries, nil
 }
 
+func (c *Client) ListTaskRunsByRepository(ctx context.Context, repositoryID string) ([]storage.TaskRunSummary, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	filter := bson.M{"repository_id": repositoryID}
+	cur, err := c.taskRuns.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "started_at", Value: -1}}))
+	if err != nil {
+		c.logger.Error("list task runs by repo", zap.Error(err), zap.String("repository_id", repositoryID))
+		return nil, fmt.Errorf("list task runs by repo: %w", err)
+	}
+	defer cur.Close(context.Background())
+
+	runs := make([]storage.TaskRun, 0)
+	for cur.Next(ctx) {
+		var run storage.TaskRun
+		if err := cur.Decode(&run); err != nil {
+			return nil, fmt.Errorf("decode task run: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := cur.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task runs: %w", err)
+	}
+
+	runIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		runIDs = append(runIDs, run.ID)
+	}
+
+	counts, err := c.fetchEventCounts(ctx, runIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]storage.TaskRunSummary, 0, len(runs))
+	for _, run := range runs {
+		summaries = append(summaries, storage.TaskRunSummary{
+			TaskRun:     run,
+			TotalEvents: counts[run.ID],
+		})
+	}
+	return summaries, nil
+}
+
 func (c *Client) fetchEventCounts(ctx context.Context, runIDs []string) (map[string]int64, error) {
 	if len(runIDs) == 0 {
 		return map[string]int64{}, nil
