@@ -161,11 +161,19 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 
 	for _, batch := range batches {
 		switch batch.Status {
-		case storage.BatchStatusPaused, storage.BatchStatusFailed, storage.BatchStatusDone:
+		case storage.BatchStatusPaused:
+			s.logger.Debug("batch paused; skipping", zap.String("batch_id", batch.ID))
+			continue
+		case storage.BatchStatusFailed, storage.BatchStatusDone:
 			continue
 		}
 		pendingIdx, hasInProgress := nextPendingIndex(batch.Items)
-		if hasInProgress || pendingIdx == -1 {
+		if hasInProgress {
+			s.logger.Debug("batch already in progress; skipping", zap.String("batch_id", batch.ID))
+			continue
+		}
+		if pendingIdx == -1 {
+			s.logger.Debug("batch has no pending items; skipping", zap.String("batch_id", batch.ID))
 			continue
 		}
 
@@ -188,6 +196,7 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		}
 
 		work := consumer.WorkItem{BatchID: batch.ID, TaskRef: batch.Items[pendingIdx].Input}
+		s.logger.Debug("dispatching work item", zap.String("batch_id", batch.ID), zap.String("agent_id", claimedAgent.ID), zap.String("task_ref", work.TaskRef))
 		s.activeWG.Add(1)
 		s.activeRuns.Add(1)
 		defer func() {
