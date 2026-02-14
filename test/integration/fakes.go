@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -406,21 +405,4 @@ func (f *fakeWorker) Calls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.callCount
-}
-
-func (f *fakeWorker) SetFail(v bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.fail = v
-}
-
-// trimInputs normalizes string slices similar to handler logic.
-func trimInputs(items []string) []string {
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		if trimmed := strings.TrimSpace(it); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }

@@ -5,7 +5,7 @@ go 1.25.6
 require (
 	github.com/github/copilot-sdk/go v0.1.23
 	github.com/gorilla/mux v1.8.1
-	github.com/slack-go/slack v0.17.3
+	github.com/gorilla/websocket v1.5.3
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.17.9
 	go.uber.org/zap v1.27.1
@@ -15,7 +15,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
