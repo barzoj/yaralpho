@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/barzoj/yaralpho/internal/consumer"
 	"github.com/barzoj/yaralpho/internal/storage"
@@ -25,28 +26,47 @@ type Worker interface {
 	Process(ctx context.Context, item consumer.WorkItem) error
 }
 
-const defaultMaxRetries = 5
+const (
+	defaultMaxRetries = 5
+	defaultInterval   = 10 * time.Second
+)
 
 // Scheduler drives periodic selection of batch items for execution.
 type Scheduler struct {
 	store      Storage
 	worker     Worker
 	logger     *zap.Logger
+	interval   time.Duration
 	draining   atomic.Bool
 	activeWG   sync.WaitGroup
 	activeRuns atomic.Int64
 	maxRetries int
 }
 
-// New constructs a Scheduler with the provided dependencies.
-func New(store Storage, worker Worker, logger *zap.Logger, maxRetries int) *Scheduler {
+// Options configures Scheduler construction.
+type Options struct {
+	// Interval controls how often Start will invoke Tick. A zero or negative value defaults to 10s.
+	Interval time.Duration
+	// Draining sets the initial draining state; when true, no new work is scheduled until cleared.
+	Draining bool
+	// MaxRetries caps attempts per item; zero or negative values fall back to defaultMaxRetries.
+	MaxRetries int
+}
+
+// New constructs a Scheduler with the provided dependencies and options.
+func New(store Storage, worker Worker, logger *zap.Logger, opts Options) *Scheduler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	if maxRetries <= 0 {
-		maxRetries = defaultMaxRetries
+	if opts.MaxRetries <= 0 {
+		opts.MaxRetries = defaultMaxRetries
 	}
-	return &Scheduler{store: store, worker: worker, logger: logger, maxRetries: maxRetries}
+	if opts.Interval <= 0 {
+		opts.Interval = defaultInterval
+	}
+	s := &Scheduler{store: store, worker: worker, logger: logger, maxRetries: opts.MaxRetries, interval: opts.Interval}
+	s.draining.Store(opts.Draining)
+	return s
 }
 
 // SetDraining toggles the draining flag. When draining, Tick does nothing.
@@ -90,9 +110,28 @@ func (s *Scheduler) WaitForIdle(ctx context.Context) error {
 	}
 }
 
+// Start begins periodic ticking at the configured interval until the context is
+// canceled or Stop is called. Stub implementation; Tick must be invoked
+// manually until periodic scheduling is implemented.
+func (s *Scheduler) Start(ctx context.Context) error {
+	_ = ctx
+	return nil
+}
+
+// Stop requests a graceful shutdown of periodic ticking and prevents new work
+// from starting by enabling draining. Stub implementation; callers should
+// invoke WaitForIdle to block until in-flight work completes.
+func (s *Scheduler) Stop(ctx context.Context) error {
+	_ = ctx
+	s.SetDraining(true)
+	return nil
+}
+
 // Tick selects the next pending item across batches and dispatches it to the
 // worker. It enforces per-batch sequential execution, skips paused batches, and
-// requires an idle agent before scheduling work.
+// requires an idle agent before scheduling work. Tick must only be driven by a
+// single process at a time; when draining is true, Tick should avoid starting
+// new work.
 func (s *Scheduler) Tick(ctx context.Context) error {
 	if s == nil {
 		return nil

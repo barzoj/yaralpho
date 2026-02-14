@@ -14,9 +14,18 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestSchedulerInterface(t *testing.T) {
+	var _ Controller = (*Scheduler)(nil)
+
+	sched := New(&fakeStorage{}, &fakeWorker{}, zap.NewNop(), Options{Interval: time.Second, Draining: true, MaxRetries: 3})
+	require.True(t, sched.Draining())
+	require.Equal(t, 0, sched.ActiveCount())
+	require.NoError(t, sched.Stop(context.Background()))
+}
+
 func TestTick_NoBatches(t *testing.T) {
 	st := &fakeStorage{}
-	sched := New(st, &fakeWorker{}, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, &fakeWorker{}, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.Zero(t, st.updateBatchCalls)
@@ -25,7 +34,7 @@ func TestTick_NoBatches(t *testing.T) {
 func TestTick_DrainingSkips(t *testing.T) {
 	st := &fakeStorage{batches: []storage.Batch{{ID: "b1"}}, agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}}}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 	sched.SetDraining(true)
 
 	require.NoError(t, sched.Tick(context.Background()))
@@ -45,7 +54,7 @@ func TestWaitForIdleTracksActiveWork(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	worker := &blockingWorker{started: started, release: release}
-	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	go func() {
 		require.NoError(t, sched.Tick(context.Background()))
@@ -82,7 +91,7 @@ func TestTick_NoIdleAgents(t *testing.T) {
 		batches: []storage.Batch{{ID: "b1", Items: []storage.BatchItem{{Input: "t1", Status: storage.ItemStatusPending}}, Status: storage.BatchStatusPending}},
 		agents:  []storage.Agent{{ID: "a1", Status: storage.AgentStatusBusy}},
 	}
-	sched := New(st, &fakeWorker{}, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, &fakeWorker{}, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.Equal(t, storage.BatchStatusPending, st.batches[0].Status)
@@ -97,7 +106,7 @@ func TestTick_SkipsPausedAndInProgressBatches(t *testing.T) {
 		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.False(t, worker.called, "no work should be dispatched when batches are ineligible")
@@ -111,7 +120,7 @@ func TestPause_PausedBatchNotScheduled(t *testing.T) {
 		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.False(t, worker.called, "paused batch must not dispatch work")
@@ -129,7 +138,7 @@ func TestPause_ResumeAllowsScheduling(t *testing.T) {
 		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.False(t, worker.called, "paused batch must not dispatch work")
@@ -158,7 +167,7 @@ func TestTick_HappyPathClaimsAgentAndItem(t *testing.T) {
 		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{}
-	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: defaultMaxRetries})
 
 	require.NoError(t, sched.Tick(context.Background()))
 
@@ -180,7 +189,7 @@ func TestTick_RollsBackOnWorkerError(t *testing.T) {
 		agents:  []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{err: errors.New("boom")}
-	sched := New(st, worker, zap.NewNop(), 2)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: 2})
 
 	err := sched.Tick(context.Background())
 	require.Error(t, err)
@@ -202,7 +211,7 @@ func TestTick_RetryThenSuccess(t *testing.T) {
 		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{responses: []error{errors.New("first"), nil}}
-	sched := New(st, worker, zap.NewNop(), 2)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: 2})
 
 	err := sched.Tick(context.Background())
 	require.Error(t, err)
@@ -235,7 +244,7 @@ func TestTick_RetryExhausted(t *testing.T) {
 		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
 	}
 	worker := &fakeWorker{err: errors.New("always fails")}
-	sched := New(st, worker, zap.NewNop(), 2)
+	sched := New(st, worker, zap.NewNop(), Options{MaxRetries: 2})
 
 	require.Error(t, sched.Tick(context.Background()))
 
