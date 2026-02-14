@@ -129,7 +129,7 @@ Base URL defaults to `http://localhost:8080`.
 - `DELETE /agent/{id}` – delete an idle agent. Busy agents return `409`.
 
 ### Batches (repository-scoped)
-- `POST /repository/{repoid}/add?items=ISSUE-1,ISSUE-2&session_name=label` – create a pending batch under an existing repository. Returns `batch_id`, `status`, `repository_id`.
+- `POST /repository/{repoid}/add` – create a pending batch under an existing repository from JSON body `{ "items": ["ISSUE-1","ISSUE-2"], "session_name": "label" }`. Returns `batch_id`, `status`, `repository_id`.
 - `GET /batches?limit=50` – list recent batches (global view).
 - `GET /batches/{id}` – batch detail with embedded runs.
 - `GET /batches/{id}/progress` – counts of pending/running/succeeded/failed/stopped for a batch.

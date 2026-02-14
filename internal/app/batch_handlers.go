@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,12 +13,13 @@ import (
 )
 
 type addBatchRequest struct {
-	Items       []string
-	SessionName string
+	Items       []string `json:"items"`
+	SessionName string   `json:"session_name"`
 }
 
 // addBatchHandler creates a batch under a repository without enqueuing work.
-// Items are provided via the query param `items` as a comma-separated list.
+// Items are provided via JSON body with the shape:
+// { "items": ["item1", "item2"], "session_name": "label" }.
 // Optional `session_name` labels the batch for display.
 func (a *App) addBatchHandler(w http.ResponseWriter, r *http.Request) {
 	repoID := mux.Vars(r)["repoid"]
@@ -35,25 +37,24 @@ func (a *App) addBatchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemsParam := strings.TrimSpace(r.URL.Query().Get("items"))
-	if itemsParam == "" {
-		writeError(w, http.StatusBadRequest, "items is required")
+	var req addBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 
-	rawItems := strings.Split(itemsParam, ",")
-	items := make([]string, 0, len(rawItems))
-	for _, it := range rawItems {
+	items := make([]string, 0, len(req.Items))
+	for _, it := range req.Items {
 		if trimmed := strings.TrimSpace(it); trimmed != "" {
 			items = append(items, trimmed)
 		}
 	}
 	if len(items) == 0 {
-		writeError(w, http.StatusBadRequest, "no valid items provided")
+		writeError(w, http.StatusBadRequest, "items is required")
 		return
 	}
 
-	sessionName := strings.TrimSpace(r.URL.Query().Get("session_name"))
+	sessionName := strings.TrimSpace(req.SessionName)
 	now := time.Now().UTC()
 	batchID := "batch-" + strconv.FormatInt(now.UnixNano(), 10)
 

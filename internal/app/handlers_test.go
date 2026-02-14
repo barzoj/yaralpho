@@ -251,7 +251,8 @@ func TestBatchCreateUnderRepository(t *testing.T) {
 	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Test Repo", Path: "/tmp/repo"}
 	app := newTestApp(t, st)
 
-	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add?items=T1,T2&session_name=test", bytes.NewBuffer(nil))
+	body := bytes.NewBufferString(`{"items":["T1","T2"],"session_name":"test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add", body)
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, req)
 
@@ -289,7 +290,7 @@ func TestBatchCreateMissingRepository(t *testing.T) {
 	st := newHandlerTestStorage()
 	app := newTestApp(t, st)
 
-	req := httptest.NewRequest(http.MethodPost, "/repository/missing/add?items=T1", nil)
+	req := httptest.NewRequest(http.MethodPost, "/repository/missing/add", bytes.NewBufferString(`{"items":["T1"]}`))
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, req)
 
@@ -303,7 +304,7 @@ func TestBatchCreateNoItems(t *testing.T) {
 	st.repos[repoID] = storage.Repository{ID: repoID, Name: "Test Repo", Path: "/tmp/repo"}
 	app := newTestApp(t, st)
 
-	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add", nil)
+	req := httptest.NewRequest(http.MethodPost, "/repository/repo-1/add", bytes.NewBufferString(`{"items":[]}`))
 	rec := httptest.NewRecorder()
 	app.Router().ServeHTTP(rec, req)
 
