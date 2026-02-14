@@ -33,6 +33,7 @@ type schedulerController interface {
 	Draining() bool
 	ActiveCount() int
 	WaitForIdle(ctx context.Context) error
+	Tick(ctx context.Context) error
 }
 
 var (
@@ -242,6 +243,14 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.logConfigValues()
 
+	if a.scheduler != nil {
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			a.runScheduler(runCtx)
+		}()
+	}
+
 	select {
 	case <-runCtx.Done():
 	case err := <-errCh:
@@ -286,6 +295,35 @@ func (a *App) logConfigValues() {
 	}
 
 	a.logger.Info("config values", fields...)
+}
+
+func (a *App) runScheduler(ctx context.Context) {
+	if a == nil || a.scheduler == nil {
+		return
+	}
+
+	opts := schedulerOptionsFromConfig(a.cfg, a.logger)
+	interval := opts.Interval
+	if interval <= 0 {
+		interval = defaultSchedulerIntervalDuration
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	a.logger.Info("scheduler loop started", zap.Duration("interval", interval))
+	defer a.logger.Info("scheduler loop stopped")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := a.scheduler.Tick(ctx); err != nil {
+				a.logger.Warn("scheduler tick failed", zap.Error(err))
+			}
+		}
+	}
 }
 
 // Router exposes the underlying mux router for tests.

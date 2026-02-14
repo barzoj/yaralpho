@@ -343,3 +343,48 @@ func (fakeSchedulerController) SetDraining(bool)                      {}
 func (fakeSchedulerController) Draining() bool                        { return false }
 func (fakeSchedulerController) ActiveCount() int                      { return 0 }
 func (fakeSchedulerController) WaitForIdle(ctx context.Context) error { return nil }
+func (fakeSchedulerController) Tick(ctx context.Context) error        { return nil }
+
+type tickingScheduler struct {
+	tickCount int
+}
+
+func (t *tickingScheduler) SetDraining(bool)                      {}
+func (t *tickingScheduler) Draining() bool                        { return false }
+func (t *tickingScheduler) ActiveCount() int                      { return 0 }
+func (t *tickingScheduler) WaitForIdle(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+func (t *tickingScheduler) Tick(ctx context.Context) error {
+	t.tickCount++
+	return ctx.Err()
+}
+
+func TestRunScheduler_TicksUntilContextCancel(t *testing.T) {
+	cfg := fakeConfig{
+		config.PortKey:              "0",
+		config.MongoURIKey:          "mongodb://example",
+		config.MongoDBKey:           "db",
+		config.RepoPathKey:          "/repo",
+		config.BdRepoKey:            "/bd",
+		config.SchedulerIntervalKey: "5ms",
+	}
+
+	st := &fakeStorage{}
+	app, err := New(zap.NewNop(), cfg, st, noopTracker{}, noopNotifier{}, noopCopilot{})
+	require.NoError(t, err)
+
+	sched := &tickingScheduler{}
+	app.SetScheduler(sched)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		app.runScheduler(ctx)
+		close(done)
+	}()
+
+	time.Sleep(12 * time.Millisecond)
+	cancel()
+	<-done
+
+	require.GreaterOrEqual(t, sched.tickCount, 1)
+}
