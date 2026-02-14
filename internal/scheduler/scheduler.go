@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/barzoj/yaralpho/internal/consumer"
@@ -32,6 +33,8 @@ type Scheduler struct {
 	worker     Worker
 	logger     *zap.Logger
 	draining   atomic.Bool
+	activeWG   sync.WaitGroup
+	activeRuns atomic.Int64
 	maxRetries int
 }
 
@@ -49,6 +52,42 @@ func New(store Storage, worker Worker, logger *zap.Logger, maxRetries int) *Sche
 // SetDraining toggles the draining flag. When draining, Tick does nothing.
 func (s *Scheduler) SetDraining(draining bool) {
 	s.draining.Store(draining)
+}
+
+// Draining reports whether the scheduler is currently in draining mode.
+func (s *Scheduler) Draining() bool {
+	if s == nil {
+		return false
+	}
+	return s.draining.Load()
+}
+
+// ActiveCount returns the number of in-flight work items.
+func (s *Scheduler) ActiveCount() int {
+	if s == nil {
+		return 0
+	}
+	return int(s.activeRuns.Load())
+}
+
+// WaitForIdle blocks until no work items are active or the context is canceled.
+func (s *Scheduler) WaitForIdle(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.activeWG.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
 }
 
 // Tick selects the next pending item across batches and dispatches it to the
@@ -110,6 +149,12 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		}
 
 		work := consumer.WorkItem{BatchID: batch.ID, TaskRef: batch.Items[pendingIdx].Input}
+		s.activeWG.Add(1)
+		s.activeRuns.Add(1)
+		defer func() {
+			s.activeRuns.Add(-1)
+			s.activeWG.Done()
+		}()
 		workerErr := s.worker.Process(ctx, work)
 
 		pendingItem.Attempts++

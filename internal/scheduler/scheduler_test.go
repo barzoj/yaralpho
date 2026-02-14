@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/barzoj/yaralpho/internal/consumer"
 	"github.com/barzoj/yaralpho/internal/storage"
@@ -29,6 +30,51 @@ func TestTick_DrainingSkips(t *testing.T) {
 
 	require.NoError(t, sched.Tick(context.Background()))
 	require.False(t, worker.called)
+}
+
+func TestWaitForIdleTracksActiveWork(t *testing.T) {
+	st := &fakeStorage{
+		batches: []storage.Batch{{
+			ID:     "b1",
+			Status: storage.BatchStatusPending,
+			Items:  []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
+		}},
+		agents: []storage.Agent{{ID: "agent-1", Status: storage.AgentStatusIdle}},
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	worker := &blockingWorker{started: started, release: release}
+	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+
+	go func() {
+		require.NoError(t, sched.Tick(context.Background()))
+	}()
+
+	<-started
+	require.Equal(t, 1, sched.ActiveCount())
+
+	waitDone := make(chan struct{})
+	go func() {
+		require.NoError(t, sched.WaitForIdle(context.Background()))
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		t.Fatalf("WaitForIdle returned before work completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatalf("WaitForIdle did not return after work completion")
+	}
+
+	require.Equal(t, 0, sched.ActiveCount())
 }
 
 func TestTick_NoIdleAgents(t *testing.T) {
@@ -281,4 +327,19 @@ func (f *fakeWorker) Process(_ context.Context, item consumer.WorkItem) error {
 	}
 	f.callCount++
 	return resp
+}
+
+type blockingWorker struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingWorker) Process(_ context.Context, item consumer.WorkItem) error {
+	if b.started != nil {
+		close(b.started)
+	}
+	if b.release != nil {
+		<-b.release
+	}
+	return nil
 }

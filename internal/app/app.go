@@ -27,6 +27,13 @@ type BuildOptions struct {
 	Agent string
 }
 
+type schedulerController interface {
+	SetDraining(bool)
+	Draining() bool
+	ActiveCount() int
+	WaitForIdle(ctx context.Context) error
+}
+
 var (
 	newStorage func(ctx context.Context, uri, dbName string, logger *zap.Logger) (storage.Storage, error) = func(ctx context.Context, uri, dbName string, logger *zap.Logger) (storage.Storage, error) {
 		return mongostorage.New(ctx, uri, dbName, logger)
@@ -55,6 +62,7 @@ type App struct {
 	tracker    tracker.Tracker
 	notifier   notify.Notifier
 	copilot    copilot.Client
+	scheduler  schedulerController
 	router     *mux.Router
 	server     *http.Server
 	closers    []func(context.Context) error
@@ -182,6 +190,12 @@ func New(logger *zap.Logger, cfg config.Config, st storage.Storage, tr tracker.T
 	}
 
 	return app, nil
+}
+
+// SetScheduler wires the scheduler controller used by restartHandler. Tests can
+// supply a fake while production wiring may inject a real scheduler.
+func (a *App) SetScheduler(s schedulerController) {
+	a.scheduler = s
 }
 
 // Run starts the HTTP server and consumer once. It blocks until the provided

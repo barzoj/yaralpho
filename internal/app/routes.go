@@ -17,6 +17,7 @@ func (a *App) registerRoutes() {
 
 	a.router.HandleFunc("/health", a.healthHandler).Methods(http.MethodGet)
 	a.router.HandleFunc("/version", a.versionHandler).Methods(http.MethodGet)
+	a.router.HandleFunc("/restart", a.restartHandler).Methods(http.MethodPost, http.MethodGet)
 
 	a.router.HandleFunc("/repository/{repoid}/add", a.addBatchHandler).Methods(http.MethodPost)
 	a.router.HandleFunc("/repository/{repoid}/batch/{batchid}/restart", a.restartBatchHandler).Methods(http.MethodPut)
