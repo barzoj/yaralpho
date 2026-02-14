@@ -57,6 +57,49 @@ func TestTick_SkipsPausedAndInProgressBatches(t *testing.T) {
 	require.False(t, worker.called, "no work should be dispatched when batches are ineligible")
 }
 
+func TestPause_PausedBatchNotScheduled(t *testing.T) {
+	st := &fakeStorage{
+		batches: []storage.Batch{
+			{ID: "paused", Status: storage.BatchStatusPaused, Items: []storage.BatchItem{{Input: "t0", Status: storage.ItemStatusPending}}},
+		},
+		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
+	}
+	worker := &fakeWorker{}
+	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+
+	require.NoError(t, sched.Tick(context.Background()))
+	require.False(t, worker.called, "paused batch must not dispatch work")
+
+	b := st.batches[0]
+	require.Equal(t, storage.BatchStatusPaused, b.Status)
+	require.Equal(t, storage.ItemStatusPending, b.Items[0].Status)
+}
+
+func TestPause_ResumeAllowsScheduling(t *testing.T) {
+	st := &fakeStorage{
+		batches: []storage.Batch{
+			{ID: "paused", Status: storage.BatchStatusPaused, Items: []storage.BatchItem{{Input: "t0", Status: storage.ItemStatusPending}}},
+		},
+		agents: []storage.Agent{{ID: "a1", Status: storage.AgentStatusIdle}},
+	}
+	worker := &fakeWorker{}
+	sched := New(st, worker, zap.NewNop(), defaultMaxRetries)
+
+	require.NoError(t, sched.Tick(context.Background()))
+	require.False(t, worker.called, "paused batch must not dispatch work")
+
+	st.batches[0].Status = storage.BatchStatusPending
+	worker.called = false
+
+	require.NoError(t, sched.Tick(context.Background()))
+	require.True(t, worker.called, "resumed batch should dispatch work")
+
+	b := st.batches[0]
+	require.Equal(t, storage.BatchStatusDone, b.Status)
+	require.Equal(t, storage.ItemStatusDone, b.Items[0].Status)
+	require.Equal(t, 1, b.Items[0].Attempts)
+}
+
 func TestTick_HappyPathClaimsAgentAndItem(t *testing.T) {
 	st := &fakeStorage{
 		batches: []storage.Batch{{
