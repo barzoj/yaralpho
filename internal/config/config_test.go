@@ -24,6 +24,8 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
         "GITHUB_TOKEN": "json-gh",
         "YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json",
         "YARALPHO_MAX_RETRIES": "3",
+        "YARALPHO_SCHEDULER_INTERVAL": "99s",
+        "YARALPHO_RESTART_WAIT_TIMEOUT": "45s",
         "YARALPHO_EXECUTION_TASK_PROMPT": "json execution",
         "YARALPHO_VERIFICATION_TASK_PROMPT": "json verification"
     }`)
@@ -35,6 +37,8 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	t.Setenv(GhTokenKey, "env-gh-token")
 	t.Setenv(SlackWebhookKey, "https://example.com/env")
 	t.Setenv(MaxRetriesKey, "7")
+	t.Setenv(SchedulerIntervalKey, "15s")
+	t.Setenv(RestartWaitTimeoutKey, "20s")
 	t.Setenv(ExecutionTaskPromptKey, "env execution prompt")
 	t.Setenv(VerificationTaskPromptKey, "env verification prompt")
 
@@ -60,6 +64,14 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	maxRetries, err := cfg.Get(MaxRetriesKey)
 	require.NoError(t, err)
 	require.Equal(t, "7", maxRetries)
+
+	interval, err := cfg.Get(SchedulerIntervalKey)
+	require.NoError(t, err)
+	require.Equal(t, "15s", interval)
+
+	restartWait, err := cfg.Get(RestartWaitTimeoutKey)
+	require.NoError(t, err)
+	require.Equal(t, "20s", restartWait)
 
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)
@@ -87,6 +99,8 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	t.Setenv(PortKey, "")
 	t.Setenv(SlackWebhookKey, "")
 	t.Setenv(MaxRetriesKey, "")
+	t.Setenv(SchedulerIntervalKey, "")
+	t.Setenv(RestartWaitTimeoutKey, "")
 	t.Setenv(ExecutionTaskPromptKey, "")
 	t.Setenv(VerificationTaskPromptKey, "")
 
@@ -107,6 +121,14 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	maxRetries, err := cfg.Get(MaxRetriesKey)
 	require.NoError(t, err)
 	require.Equal(t, "5", maxRetries)
+
+	interval, err := cfg.Get(SchedulerIntervalKey)
+	require.NoError(t, err)
+	require.Equal(t, "10s", interval)
+
+	restartWait, err := cfg.Get(RestartWaitTimeoutKey)
+	require.NoError(t, err)
+	require.Equal(t, "30s", restartWait)
 
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)

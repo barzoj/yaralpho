@@ -15,6 +15,7 @@ import (
 	"github.com/barzoj/yaralpho/internal/consumer"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
+	"github.com/barzoj/yaralpho/internal/scheduler"
 	"github.com/barzoj/yaralpho/internal/storage"
 	mongostorage "github.com/barzoj/yaralpho/internal/storage/mongo"
 	"github.com/barzoj/yaralpho/internal/tracker"
@@ -49,6 +50,9 @@ var (
 	}
 	newCodexClient = func(logger *zap.Logger) copilot.Client {
 		return copilot.NewCodex(logger)
+	}
+	newScheduler func(st scheduler.Storage, worker scheduler.Worker, logger *zap.Logger, opts scheduler.Options) schedulerController = func(st scheduler.Storage, worker scheduler.Worker, logger *zap.Logger, opts scheduler.Options) schedulerController {
+		return scheduler.New(st, worker, logger, opts)
 	}
 )
 
@@ -119,7 +123,21 @@ func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config
 		return nil, err
 	}
 
-	return New(logger, cfg, st, tr, nt, cp)
+	repoPath, err := cfg.Get(config.RepoPathKey)
+	if err != nil {
+		return nil, fmt.Errorf("get repo path: %w", err)
+	}
+
+	application, err := New(logger, cfg, st, tr, nt, cp)
+	if err != nil {
+		return nil, err
+	}
+
+	worker := consumer.NewWorker(tr, cp, st, nt, cfg, repoPath, logger)
+	schedOpts := schedulerOptionsFromConfig(cfg, logger)
+	application.SetScheduler(newScheduler(st, worker, logger, schedOpts))
+
+	return application, nil
 }
 
 func copilotClientForAgent(logger *zap.Logger, agent string) (copilot.Client, error) {

@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/barzoj/yaralpho/internal/copilot"
 	"github.com/barzoj/yaralpho/internal/notify"
+	"github.com/barzoj/yaralpho/internal/scheduler"
 	"github.com/barzoj/yaralpho/internal/storage"
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
@@ -288,3 +290,56 @@ func TestBuildWithOptionsSelectsAgent(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildWithOptions_WiresSchedulerOptionsFromConfig(t *testing.T) {
+	cfg := fakeConfig{
+		config.PortKey:              "0",
+		config.MongoURIKey:          "mongodb://example",
+		config.MongoDBKey:           "db",
+		config.RepoPathKey:          "/repo",
+		config.BdRepoKey:            "/repo",
+		config.SchedulerIntervalKey: "250ms",
+		config.MaxRetriesKey:        "9",
+	}
+
+	origNewStorage := newStorage
+	origNewTracker := newTracker
+	origNewNotifier := newNotifier
+	origNewScheduler := newScheduler
+	t.Cleanup(func() {
+		newStorage = origNewStorage
+		newTracker = origNewTracker
+		newNotifier = origNewNotifier
+		newScheduler = origNewScheduler
+	})
+
+	newStorage = func(ctx context.Context, uri, dbName string, logger *zap.Logger) (storage.Storage, error) {
+		return &fakeStorage{}, nil
+	}
+	newTracker = func(cfg config.Config, logger *zap.Logger) (tracker.Tracker, error) {
+		return fakeTracker{}, nil
+	}
+	newNotifier = func(cfg config.Config, logger *zap.Logger) (notify.Notifier, error) {
+		return fakeNotifier{}, nil
+	}
+
+	var captured scheduler.Options
+	newScheduler = func(st scheduler.Storage, worker scheduler.Worker, logger *zap.Logger, opts scheduler.Options) schedulerController {
+		captured = opts
+		return fakeSchedulerController{}
+	}
+
+	a, err := BuildWithOptions(context.Background(), zap.NewNop(), cfg, BuildOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, a)
+
+	require.Equal(t, 250*time.Millisecond, captured.Interval)
+	require.Equal(t, 9, captured.MaxRetries)
+}
+
+type fakeSchedulerController struct{}
+
+func (fakeSchedulerController) SetDraining(bool)                      {}
+func (fakeSchedulerController) Draining() bool                        { return false }
+func (fakeSchedulerController) ActiveCount() int                      { return 0 }
+func (fakeSchedulerController) WaitForIdle(ctx context.Context) error { return nil }

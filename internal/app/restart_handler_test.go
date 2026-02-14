@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barzoj/yaralpho/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,6 +74,25 @@ func TestRestartHandler_WaitBlocksUntilIdle(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"active_runs":0`)
 }
 
+func TestRestartHandler_WaitTimeout(t *testing.T) {
+	app := newTestApp(t, newHandlerTestStorage())
+	if cfg, ok := app.cfg.(fakeConfig); ok {
+		cfg[config.RestartWaitTimeoutKey] = "5ms"
+	}
+
+	sched := &fakeScheduler{active: 1, waitCh: make(chan struct{})}
+	app.SetScheduler(sched)
+
+	req := httptest.NewRequest(http.MethodPost, "/restart?wait=true", nil)
+	rec := httptest.NewRecorder()
+
+	app.Router().ServeHTTP(rec, req)
+
+	require.True(t, sched.waitCalled)
+	require.Equal(t, http.StatusRequestTimeout, rec.Code)
+	require.Contains(t, rec.Body.String(), "timed out")
+}
+
 type fakeScheduler struct {
 	draining   bool
 	waitCalled bool
@@ -84,10 +104,14 @@ type fakeScheduler struct {
 func (f *fakeScheduler) SetDraining(draining bool) { f.draining = draining }
 func (f *fakeScheduler) Draining() bool            { return f.draining }
 func (f *fakeScheduler) ActiveCount() int          { return f.active }
-func (f *fakeScheduler) WaitForIdle(_ context.Context) error {
+func (f *fakeScheduler) WaitForIdle(ctx context.Context) error {
 	f.waitCalled = true
 	if f.waitCh != nil {
-		<-f.waitCh
+		select {
+		case <-f.waitCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return f.waitErr
 }

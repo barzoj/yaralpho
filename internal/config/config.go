@@ -29,6 +29,8 @@ const (
 	GhTokenKey                = "GH_TOKEN"
 	GithubTokenKey            = "GITHUB_TOKEN"
 	MaxRetriesKey             = "YARALPHO_MAX_RETRIES"
+	SchedulerIntervalKey      = "YARALPHO_SCHEDULER_INTERVAL"
+	RestartWaitTimeoutKey     = "YARALPHO_RESTART_WAIT_TIMEOUT"
 	ExecutionTaskPromptKey    = "YARALPHO_EXECUTION_TASK_PROMPT"
 	VerificationTaskPromptKey = "YARALPHO_VERIFICATION_TASK_PROMPT"
 	ConfigPathOverride        = "RALPH_CONFIG"
@@ -37,6 +39,8 @@ const (
 const (
 	defaultConfigPath          = "config.json"
 	defaultMaxRetries          = "5"
+	defaultSchedulerInterval   = "10s"
+	defaultRestartWaitTimeout  = "30s"
 	defaultExecutionTaskPrompt = `
 	You are an execution agent. There is no human available to assist you. You need to complete the assigned task by following the instructions and working with the tools at your disposal.
 	Make sure to read staff-software-engineer skill if writing any code.
@@ -106,6 +110,8 @@ var envOverrideKeys = []string{
 	GhTokenKey,
 	GithubTokenKey,
 	MaxRetriesKey,
+	SchedulerIntervalKey,
+	RestartWaitTimeoutKey,
 	ExecutionTaskPromptKey,
 	VerificationTaskPromptKey,
 }
@@ -127,6 +133,8 @@ func LoggableKeys() []string {
 		PortKey,
 		SlackWebhookKey,
 		MaxRetriesKey,
+		SchedulerIntervalKey,
+		RestartWaitTimeoutKey,
 		ExecutionTaskPromptKey,
 		VerificationTaskPromptKey,
 	}
@@ -189,6 +197,12 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 
 	if strings.TrimSpace(values[MaxRetriesKey]) == "" {
 		values[MaxRetriesKey] = defaultMaxRetries
+	}
+	if strings.TrimSpace(values[SchedulerIntervalKey]) == "" {
+		values[SchedulerIntervalKey] = defaultSchedulerInterval
+	}
+	if strings.TrimSpace(values[RestartWaitTimeoutKey]) == "" {
+		values[RestartWaitTimeoutKey] = defaultRestartWaitTimeout
 	}
 	if strings.TrimSpace(values[ExecutionTaskPromptKey]) == "" {
 		values[ExecutionTaskPromptKey] = defaultExecutionTaskPrompt
