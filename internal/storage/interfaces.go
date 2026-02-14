@@ -6,6 +6,13 @@ import "context"
 // events. Implementations must remain agnostic to any specific database
 // driver types and honor the provided context for cancellation and timeouts.
 type Storage interface {
+	CreateRepository(ctx context.Context, repo *Repository) error
+	UpdateRepository(ctx context.Context, repo *Repository) error
+	GetRepository(ctx context.Context, id string) (*Repository, error)
+	ListRepositories(ctx context.Context) ([]Repository, error)
+	DeleteRepository(ctx context.Context, id string) error
+	RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error)
+
 	CreateBatch(ctx context.Context, batch *Batch) error
 	UpdateBatch(ctx context.Context, batch *Batch) error
 	GetBatch(ctx context.Context, batchID string) (*Batch, error)
@@ -14,6 +21,7 @@ type Storage interface {
 	CreateTaskRun(ctx context.Context, run *TaskRun) error
 	UpdateTaskRun(ctx context.Context, run *TaskRun) error
 	GetTaskRun(ctx context.Context, runID string) (*TaskRun, error)
+	ListTaskRunsByRepository(ctx context.Context, repositoryID string) ([]TaskRunSummary, error)
 	// ListTaskRuns returns runs for a batch. If batchID is empty, implementations
 	// may return runs across all batches. Runs should be sorted by started_at
 	// descending for deterministic output and include aggregated metadata such as

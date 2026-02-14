@@ -39,10 +39,12 @@ func TestMongoStorageCRUD(t *testing.T) {
 
 	now := time.Now().UTC()
 	batch := &storage.Batch{
-		ID:         "batch-1",
-		CreatedAt:  now,
-		InputItems: []string{"task-1"},
-		Status:     storage.BatchStatusCreated,
+		ID:           "batch-1",
+		RepositoryID: "repo-1",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Items:        []storage.BatchItem{{Input: "task-1", Status: string(storage.BatchStatusCreated), Attempts: 0}},
+		Status:       storage.BatchStatusCreated,
 	}
 	if err := client.CreateBatch(ctx, batch); err != nil {
 		t.Fatalf("CreateBatch: %v", err)
