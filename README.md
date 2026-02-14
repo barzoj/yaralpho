@@ -4,24 +4,7 @@ Ralph Runner is a Go 1.25+ service that schedules repository-scoped batches of t
 
 ## Agent providers
 
-Startup agent selection is explicit via `--agent`, and defaults to `codex`.
-
-- Allowed values: `codex` (default), `github`
-- Invalid values fail fast at process start (exit code `2`)
-- There is no silent fallback to another provider
-
-Examples:
-
-```bash
-# Default (equivalent to --agent=codex)
-go run ./cmd
-
-# Explicit Codex provider
-go run ./cmd --agent=codex
-
-# GitHub Copilot provider
-go run ./cmd --agent=github
-```
+Providers are now selected per agent record via the `runtime` field (`codex|copilot`). The service always starts with the Codex client available; each scheduled item runs on whichever idle agent the scheduler selects, using that agent’s runtime.
 
 ### Codex wrapper requirements
 

@@ -22,6 +22,8 @@ import (
 type WorkItem struct {
 	BatchID string `json:"batch_id"`
 	TaskRef string `json:"task_ref"`
+	AgentID string `json:"agent_id"`
+	Runtime string `json:"runtime"`
 }
 
 // Worker executes scheduler-selected work items and orchestrates task runs via
@@ -29,7 +31,6 @@ type WorkItem struct {
 type Worker struct {
 	cfg      config.Config
 	tracker  tracker.Tracker
-	copilot  copilot.Client
 	storage  storage.Storage
 	notifier notify.Notifier
 	repoPath string
@@ -38,6 +39,11 @@ type Worker struct {
 	newRunID func() string
 	bus      bus.Bus
 	titleMap map[string]string
+
+	codexClient  copilot.Client
+	githubClient copilot.Client
+	newCodex     func(*zap.Logger) copilot.Client
+	newGitHub    func(*zap.Logger) copilot.Client
 }
 
 // NewWorker constructs a Worker with sensible defaults for logger, notifier,
@@ -56,12 +62,19 @@ func NewWorker(tr tracker.Tracker, cp copilot.Client, st storage.Storage, nt not
 	return &Worker{
 		cfg:      cfg,
 		tracker:  tr,
-		copilot:  cp,
 		storage:  st,
 		notifier: nt,
 		bus:      sessionEventBus,
 		repoPath: strings.TrimSpace(repoPath),
 		logger:   logger,
+		codexClient: func() copilot.Client {
+			if cp != nil {
+				return cp
+			}
+			return copilot.NewCodex(logger)
+		}(),
+		newCodex:  func(l *zap.Logger) copilot.Client { return copilot.NewCodex(l) },
+		newGitHub: func(l *zap.Logger) copilot.Client { return copilot.NewGitHub(l) },
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -91,10 +104,33 @@ func (w *Worker) Process(ctx context.Context, item WorkItem) error {
 	setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusInProgress)
 	w.notifyTaskEvent(ctx, notify.Event{Type: "task_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: taskName, Status: "running"})
 
-	return w.handleSingleTask(ctx, batch, item)
+	cpClient, err := w.clientForRuntime(item.Runtime)
+	if err != nil {
+		return err
+	}
+
+	return w.handleSingleTask(ctx, batch, item, cpClient)
 }
 
-func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, item WorkItem) error {
+func (w *Worker) clientForRuntime(runtime string) (copilot.Client, error) {
+	rt := strings.ToLower(strings.TrimSpace(runtime))
+	switch rt {
+	case "", "codex":
+		if w.codexClient == nil {
+			w.codexClient = w.newCodex(w.logger)
+		}
+		return w.codexClient, nil
+	case "copilot", "github":
+		if w.githubClient == nil {
+			w.githubClient = w.newGitHub(w.logger)
+		}
+		return w.githubClient, nil
+	default:
+		return nil, fmt.Errorf("unknown agent runtime %q", runtime)
+	}
+}
+
+func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, item WorkItem, cp copilot.Client) error {
 	retries, hasRetries := w.parseMaxRetries()
 	attempts := 0
 	for {
@@ -102,7 +138,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 		w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, item.TaskRef), Status: "in_progress", Attempt: attempts})
 		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
 		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
-		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, execInstruction, verifyInstruction)
+		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, item.TaskRef, execInstruction, verifyInstruction, cp)
 		if err != nil {
 			return err
 		}
@@ -123,8 +159,8 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, ite
 	}
 }
 
-func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, taskRef, execInstruction, verifyInstruction string) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
-	execTask := NewExecutionTask(w.cfg, w.tracker, w.copilot, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
+func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, taskRef, execInstruction, verifyInstruction string, cp copilot.Client) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
+	execTask := NewExecutionTask(w.cfg, w.tracker, cp, w.storage, w.notifier, w.logger, w.repoPath, execInstruction)
 	execTask.newRunID = w.newRunID
 	execTask.now = w.now
 

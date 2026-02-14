@@ -49,7 +49,7 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 	now := time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
 
-	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"})
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1", Runtime: "codex"})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{
@@ -114,7 +114,7 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 	now := time.Date(2026, 2, 8, 15, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
 
-	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-idle"})
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-idle", Runtime: "codex"})
 	require.NoError(t, err)
 
 	run := st.runs["run-idle-1"]
@@ -168,9 +168,9 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 	}
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 22, 0, 0, 0, time.UTC) }
 
-	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1"}))
-	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-2"}))
-	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-3"}))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1", Runtime: "codex"}))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-2", Runtime: "codex"}))
+	require.NoError(t, w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-3", Runtime: "codex"}))
 
 	require.Equal(t, []string{
 		"exec\n\nWork on task task-1",
@@ -224,7 +224,7 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 	w.newRunID = func() string { return "run-fail" }
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 14, 0, 0, 0, time.UTC) }
 
-	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-err"})
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-err", Runtime: "codex"})
 	require.Error(t, err)
 
 	run := st.runs["run-fail"]

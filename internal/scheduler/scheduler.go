@@ -196,7 +196,12 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 			return fmt.Errorf("update agent %s: %w", idleAgent.ID, err)
 		}
 
-		work := consumer.WorkItem{BatchID: batch.ID, TaskRef: batch.Items[pendingIdx].Input}
+		work := consumer.WorkItem{
+			BatchID: batch.ID,
+			TaskRef: batch.Items[pendingIdx].Input,
+			AgentID: claimedAgent.ID,
+			Runtime: claimedAgent.Runtime,
+		}
 		claimFields := append(withBatchFields(batch, pendingIdx), withAgentFields(&claimedAgent)...)
 		s.logger.Info("claiming work item", append(claimFields, zap.String("task_ref", work.TaskRef))...)
 		s.activeWG.Add(1)

@@ -222,7 +222,8 @@ func TestVersionRouteDefaultsToDev(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"version":"dev"`)
 }
 
-func TestBuildWithOptionsSelectsAgent(t *testing.T) {
+// BuildWithOptions currently mirrors Build; retained for compatibility only.
+func TestBuildWithOptions_SameAsBuild(t *testing.T) {
 	cfg := fakeConfig{
 		config.PortKey:     "0",
 		config.MongoURIKey: "mongodb://example",
@@ -234,14 +235,10 @@ func TestBuildWithOptionsSelectsAgent(t *testing.T) {
 	origNewStorage := newStorage
 	origNewTracker := newTracker
 	origNewNotifier := newNotifier
-	origNewGitHubClient := newGitHubClient
-	origNewCodexClient := newCodexClient
 	t.Cleanup(func() {
 		newStorage = origNewStorage
 		newTracker = origNewTracker
 		newNotifier = origNewNotifier
-		newGitHubClient = origNewGitHubClient
-		newCodexClient = origNewCodexClient
 	})
 
 	newStorage = func(ctx context.Context, uri, db string, logger *zap.Logger) (storage.Storage, error) {
@@ -253,42 +250,12 @@ func TestBuildWithOptionsSelectsAgent(t *testing.T) {
 	newNotifier = func(cfg config.Config, logger *zap.Logger) (notify.Notifier, error) {
 		return fakeNotifier{}, nil
 	}
-	newGitHubClient = func(logger *zap.Logger) copilot.Client {
-		return taggedCopilot{tag: "github"}
-	}
-	newCodexClient = func(logger *zap.Logger) copilot.Client {
-		return taggedCopilot{tag: "codex"}
-	}
 
-	tests := []struct {
-		name      string
-		agent     string
-		wantTag   string
-		wantError string
-	}{
-		{name: "default agent uses codex", agent: "", wantTag: "codex"},
-		{name: "explicit codex", agent: "codex", wantTag: "codex"},
-		{name: "explicit github", agent: "github", wantTag: "github"},
-		{name: "invalid agent errors", agent: "invalid", wantError: "unknown agent"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			a, err := BuildWithOptions(context.Background(), zap.NewNop(), cfg, BuildOptions{Agent: tc.agent})
-			if tc.wantError != "" {
-				require.Error(t, err)
-				require.ErrorContains(t, err, tc.wantError)
-				require.Nil(t, a)
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, a)
-			cp, ok := a.copilot.(taggedCopilot)
-			require.True(t, ok)
-			require.Equal(t, tc.wantTag, cp.tag)
-		})
-	}
+	a, err := BuildWithOptions(context.Background(), zap.NewNop(), cfg, BuildOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, a)
+	_, ok := a.copilot.(copilot.Client)
+	require.True(t, ok)
 }
 
 func TestBuildWithOptions_WiresSchedulerOptionsFromConfig(t *testing.T) {

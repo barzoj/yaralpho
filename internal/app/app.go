@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,10 +22,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// BuildOptions controls provider selection at composition time.
-type BuildOptions struct {
-	Agent string
-}
+// BuildOptions is kept for compatibility; no options are currently supported.
+type BuildOptions struct{}
 
 type schedulerController interface {
 	SetDraining(bool)
@@ -84,8 +81,8 @@ func Build(ctx context.Context, logger *zap.Logger, cfg config.Config) (*App, er
 }
 
 // BuildWithOptions constructs the production App using concrete
-// implementations and provider-selection options.
-func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config, opts BuildOptions) (*App, error) {
+// implementations. Provider selection is now per-agent runtime.
+func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config, _ BuildOptions) (*App, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -119,16 +116,12 @@ func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config
 		return nil, fmt.Errorf("init notifier: %w", err)
 	}
 
-	cp, err := copilotClientForAgent(logger, opts.Agent)
-	if err != nil {
-		return nil, err
-	}
-
 	repoPath, err := cfg.Get(config.RepoPathKey)
 	if err != nil {
 		return nil, fmt.Errorf("get repo path: %w", err)
 	}
 
+	cp := copilot.NewCodex(logger)
 	application, err := New(logger, cfg, st, tr, nt, cp)
 	if err != nil {
 		return nil, err
@@ -139,17 +132,6 @@ func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config
 	application.SetScheduler(newScheduler(st, worker, logger, schedOpts))
 
 	return application, nil
-}
-
-func copilotClientForAgent(logger *zap.Logger, agent string) (copilot.Client, error) {
-	switch strings.ToLower(strings.TrimSpace(agent)) {
-	case "", "codex":
-		return newCodexClient(logger), nil
-	case "github":
-		return newGitHubClient(logger), nil
-	default:
-		return nil, fmt.Errorf("unknown agent %q (allowed: codex, github)", agent)
-	}
 }
 
 // New assembles an App from already-constructed interfaces. It is primarily

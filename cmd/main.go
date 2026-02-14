@@ -18,10 +18,9 @@ import (
 type cliOptions struct {
 	ConfigPath string
 	LogLevel   string
-	Agent      string
 }
 
-var buildWithOptions = app.BuildWithOptions
+var buildApp = app.Build
 
 func main() {
 	opts, err := parseCLIOptions(os.Args[1:])
@@ -49,7 +48,7 @@ func main() {
 		logger.Fatal("load config", zap.Error(err))
 	}
 
-	application, err := buildApplication(context.Background(), logger, cfg, opts.Agent)
+	application, err := buildApplication(context.Background(), logger, cfg)
 	if err != nil {
 		logger.Fatal("build app", zap.Error(err))
 	}
@@ -68,7 +67,6 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.ConfigPath, "config", "", "optional path to config JSON file")
 	fs.StringVar(&opts.LogLevel, "debug-level", "info", "log verbosity: info (default), warn, debug")
-	fs.StringVar(&opts.Agent, "agent", "codex", "agent provider: codex (default), github")
 	if err := fs.Parse(args); err != nil {
 		return cliOptions{}, err
 	}
@@ -83,19 +81,9 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 		return cliOptions{}, fmt.Errorf("invalid debug-level %q (allowed: info, warn, debug)", opts.LogLevel)
 	}
 
-	agent := strings.ToLower(strings.TrimSpace(opts.Agent))
-	switch agent {
-	case "", "codex":
-		opts.Agent = "codex"
-	case "github":
-		opts.Agent = "github"
-	default:
-		return cliOptions{}, fmt.Errorf("invalid agent %q (allowed: codex, github)", opts.Agent)
-	}
-
 	return opts, nil
 }
 
-func buildApplication(ctx context.Context, logger *zap.Logger, cfg config.Config, agent string) (*app.App, error) {
-	return buildWithOptions(ctx, logger, cfg, app.BuildOptions{Agent: agent})
+func buildApplication(ctx context.Context, logger *zap.Logger, cfg config.Config) (*app.App, error) {
+	return buildApp(ctx, logger, cfg)
 }

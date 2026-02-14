@@ -10,33 +10,17 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestParseCLIOptionsAgent(t *testing.T) {
+func TestParseCLIOptions(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		wantAgent string
-		wantErr   string
+		name    string
+		args    []string
+		wantLog string
+		wantErr string
 	}{
-		{
-			name:      "default agent is codex",
-			args:      []string{},
-			wantAgent: "codex",
-		},
-		{
-			name:      "github accepted",
-			args:      []string{"--agent=github"},
-			wantAgent: "github",
-		},
-		{
-			name:      "codex accepted",
-			args:      []string{"--agent=codex"},
-			wantAgent: "codex",
-		},
-		{
-			name:    "invalid agent rejected",
-			args:    []string{"--agent=invalid"},
-			wantErr: "invalid agent",
-		},
+		{name: "default debug-level is info", args: []string{}, wantLog: "info"},
+		{name: "warn accepted", args: []string{"--debug-level=warn"}, wantLog: "warn"},
+		{name: "debug accepted", args: []string{"--debug-level=debug"}, wantLog: "debug"},
+		{name: "invalid level rejected", args: []string{"--debug-level=nope"}, wantErr: "invalid debug-level"},
 	}
 
 	for _, tc := range tests {
@@ -49,24 +33,22 @@ func TestParseCLIOptionsAgent(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			require.Equal(t, tc.wantAgent, opts.Agent)
+			require.Equal(t, tc.wantLog, opts.LogLevel)
 		})
 	}
 }
 
-func TestBuildApplicationPassesAgentToBuildOptions(t *testing.T) {
-	origBuildWithOptions := buildWithOptions
-	t.Cleanup(func() {
-		buildWithOptions = origBuildWithOptions
-	})
+func TestBuildApplicationCallsBuild(t *testing.T) {
+	origBuildApp := buildApp
+	t.Cleanup(func() { buildApp = origBuildApp })
 
-	var gotAgent string
-	buildWithOptions = func(ctx context.Context, logger *zap.Logger, cfg config.Config, opts app.BuildOptions) (*app.App, error) {
-		gotAgent = opts.Agent
+	called := false
+	buildApp = func(ctx context.Context, logger *zap.Logger, cfg config.Config) (*app.App, error) {
+		called = true
 		return &app.App{}, nil
 	}
 
-	_, err := buildApplication(context.Background(), zap.NewNop(), nil, "github")
+	_, err := buildApplication(context.Background(), zap.NewNop(), nil)
 	require.NoError(t, err)
-	require.Equal(t, "github", gotAgent)
+	require.True(t, called)
 }
