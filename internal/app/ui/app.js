@@ -253,6 +253,7 @@
 
   const NAV_ITEMS = [
     { label: "Batches", href: "#/", route: "batches" },
+    { label: "Control Plane", href: "#/control-plane", route: "control-plane" },
     { label: "Repositories", href: "#/repositories", route: "repositories" },
     { label: "Agents", href: "#/agents", route: "agents" },
     { label: "Version", href: "#/version", route: "version" },
@@ -884,6 +885,205 @@
     });
 
     await loadRepositories(false);
+  }
+
+  async function fetchRepositoryBatches(repoId) {
+    if (!repoId) return [];
+    const data = await fetchJSON(
+      `/repository/${encodeURIComponent(repoId)}/batches?limit=${LIST_LIMIT}`
+    );
+    if (Array.isArray(data?.batches)) return data.batches;
+    return [];
+  }
+
+  async function fetchBatchItems(batch) {
+    if (Array.isArray(batch?.items)) return batch.items;
+    try {
+      const detail = await fetchBatchDetail(batch?.batch_id);
+      if (Array.isArray(detail?.items)) return detail.items;
+    } catch (err) {
+      console.warn("Failed to fetch batch detail", err);
+    }
+    return [];
+  }
+
+  function buildTasksContent(items) {
+    const container = document.createElement("div");
+    container.className = "tasks-section";
+
+    const countPill = document.createElement("div");
+    countPill.className = "pill";
+    countPill.textContent = `${items.length} task${items.length === 1 ? "" : "s"}`;
+    container.appendChild(countPill);
+
+    if (!items.length) {
+      container.appendChild(emptyState("No tasks found for this batch."));
+      return container;
+    }
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "details-toggle";
+    toggle.textContent = "Show tasks";
+    toggle.setAttribute("aria-expanded", "false");
+
+    const scroll = document.createElement("div");
+    scroll.className = "tasks-scroll";
+    scroll.style.maxHeight = "240px";
+    scroll.style.overflowY = "auto";
+    scroll.hidden = true;
+
+    const rows = items.map((item, idx) => [
+      idx + 1,
+      item?.input || "—",
+      item?.status || "unknown",
+      Number.isFinite(item?.attempts) ? item.attempts : "—",
+    ]);
+    scroll.appendChild(
+      buildTable(["#", "Task", "Status", "Attempts"], rows)
+    );
+
+    toggle.addEventListener("click", () => {
+      const willShow = scroll.hidden;
+      scroll.hidden = !willShow;
+      toggle.textContent = `${willShow ? "Hide" : "Show"} tasks`;
+      toggle.setAttribute("aria-expanded", String(willShow));
+    });
+
+    container.appendChild(toggle);
+    container.appendChild(scroll);
+    return container;
+  }
+
+  function buildRestartAction(repoId, batch, reloadRepoBatches) {
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const status = String(batch?.status || "").toLowerCase();
+    if (status !== "failed") {
+      const pill = document.createElement("div");
+      pill.className = "pill";
+      pill.textContent = "Restart available on failed batches only";
+      actions.appendChild(pill);
+      return actions;
+    }
+
+    const restartBtn = document.createElement("button");
+    restartBtn.type = "button";
+    restartBtn.textContent = "Restart";
+    restartBtn.addEventListener("click", async () => {
+      if (restartBtn.disabled) return;
+      restartBtn.disabled = true;
+      try {
+        setStatus(`Restarting ${batch.batch_id}…`, "loading");
+        await fetchJSON(
+          `/repository/${encodeURIComponent(repoId)}/batch/${encodeURIComponent(
+            batch.batch_id
+          )}/restart`,
+          { method: "PUT" }
+        );
+        setStatus(`Restarted batch ${batch.batch_id}`, "success");
+        await reloadRepoBatches();
+      } catch (err) {
+        setStatus(err.message || `Failed to restart ${batch.batch_id}`, "error");
+      } finally {
+        restartBtn.disabled = false;
+      }
+    });
+    actions.appendChild(restartBtn);
+    return actions;
+  }
+
+  async function renderControlPlaneView() {
+    viewTitle.textContent = "Control Plane";
+    renderBreadcrumbs([{ label: "Control Plane" }]);
+    setStatus("Loading control plane…", "loading");
+    clearContent();
+
+    let repositories = [];
+    try {
+      repositories = await fetchRepositoriesList();
+    } catch (err) {
+      contentEl.appendChild(emptyState("Unable to load repositories."));
+      setStatus(err.message || "Failed to load control plane", "error");
+      return;
+    }
+
+    if (!repositories.length) {
+      contentEl.appendChild(emptyState("No repositories found."));
+      setStatus("No repositories available", "warning");
+      return;
+    }
+
+    const container = document.createElement("div");
+    container.className = "control-plane";
+    contentEl.appendChild(container);
+
+    for (const repo of repositories) {
+      const card = document.createElement("div");
+      card.className = "card";
+      const header = document.createElement("div");
+      header.className = "view-header";
+      const title = document.createElement("h3");
+      title.textContent = repo?.name || repo?.repository_id || "Repository";
+      const repoIdEl = document.createElement("div");
+      repoIdEl.className = "pill";
+      repoIdEl.textContent = repo?.repository_id || "—";
+      header.appendChild(title);
+      header.appendChild(repoIdEl);
+      card.appendChild(header);
+      const body = document.createElement("div");
+      card.appendChild(body);
+      container.appendChild(card);
+
+      const reloadBatches = async () => {
+        body.innerHTML = "";
+        let batches = [];
+        try {
+          batches = await fetchRepositoryBatches(repo.repository_id);
+        } catch (err) {
+          body.appendChild(emptyState("Unable to load batches for repository."));
+          setStatus(err.message || "Failed to load repository batches", "error");
+          return;
+        }
+
+        if (!batches.length) {
+          body.appendChild(emptyState("No batches for this repository."));
+          return;
+        }
+
+        const rows = batches.map((batch) => {
+          const tasksCell = document.createElement("div");
+          tasksCell.textContent = "Loading tasks…";
+          fetchBatchItems(batch)
+            .then((items) => {
+              tasksCell.innerHTML = "";
+              tasksCell.appendChild(buildTasksContent(items));
+            })
+            .catch(() => {
+              tasksCell.innerHTML = "";
+              tasksCell.appendChild(emptyState("Unable to load tasks for batch."));
+            });
+
+          return [
+            createLink(
+              `/app?batch=${encodeURIComponent(batch.batch_id)}`,
+              batch.batch_id || "—"
+            ),
+            tasksCell,
+            batch?.status || "unknown",
+            buildRestartAction(repo.repository_id, batch, reloadBatches),
+          ];
+        });
+
+        body.appendChild(
+          buildTable(["Batch ID", "Tasks", "Status", "Actions"], rows)
+        );
+      };
+
+      await reloadBatches();
+    }
+
+    setStatus(`Loaded ${repositories.length} repositories`, "success");
   }
 
   function buildTable(headers, rows) {
@@ -2258,6 +2458,13 @@
       renderNav,
       routeApp,
     };
+    module.exports.ControlPlaneView = {
+      renderControlPlaneView,
+      fetchRepositoryBatches,
+      getRouteFromHash,
+      renderNav,
+      routeApp,
+    };
   }
 
   function getRouteFromHash(rawHash) {
@@ -2265,6 +2472,7 @@
     const normalized = hash.replace(/^#/, "").replace(/^\/+/, "").trim();
     if (!normalized) return "";
     const [path] = normalized.split(/[?#]/);
+    if (path === "control-plane") return "control-plane";
     if (path === "repositories") return "repositories";
     if (path === "version") return "version";
     if (path === "agents") return "agents";
@@ -2284,6 +2492,10 @@
     if (route === "repositories") {
       renderNav("repositories");
       return renderRepositoriesView();
+    }
+    if (route === "control-plane") {
+      renderNav("control-plane");
+      return renderControlPlaneView();
     }
     if (route === "agents") {
       renderNav("agents");
