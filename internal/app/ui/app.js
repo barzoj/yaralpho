@@ -253,8 +253,10 @@
 
   const NAV_ITEMS = [
     { label: "Batches", href: "#/", route: "batches" },
+    { label: "Agents", href: "#/agents", route: "agents" },
     { label: "Version", href: "#/version", route: "version" },
   ];
+  const AGENT_RUNTIMES = ["codex", "copilot"];
 
   function renderNav(activeRoute) {
     if (!navEl) return;
@@ -285,8 +287,8 @@
     return div;
   }
 
-  async function fetchJSON(url) {
-    const res = await fetch(url);
+  async function fetchJSON(url, options) {
+    const res = await fetch(url, options);
     const contentType = res.headers.get("content-type") || "";
     let body;
     if (contentType.includes("application/json")) {
@@ -351,6 +353,281 @@
       throw err;
     }
     return parsed !== null ? parsed : rawText;
+  }
+
+  async function fetchAgentsList() {
+    const data = await fetchJSON("/agent");
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.agents)) return data.agents;
+    return [];
+  }
+
+  function buildAgentTable(agents, { onEdit, onDelete }) {
+    const rows = (agents || []).map((agent) => {
+      const status = agent?.status || "unknown";
+      const isBusy = String(status).toLowerCase() === "busy";
+      const actions = document.createElement("div");
+      actions.className = "actions";
+
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.disabled = isBusy;
+      if (isBusy) editBtn.title = "Agent is busy";
+      if (typeof onEdit === "function" && !isBusy) {
+        editBtn.addEventListener("click", () => onEdit(agent));
+      }
+      actions.appendChild(editBtn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.disabled = isBusy;
+      if (isBusy) deleteBtn.title = "Agent is busy";
+      if (typeof onDelete === "function" && !isBusy) {
+        deleteBtn.addEventListener("click", () => onDelete(agent));
+      }
+      actions.appendChild(deleteBtn);
+
+      return [
+        agent?.agent_id || "—",
+        agent?.name || "—",
+        agent?.runtime || "—",
+        status,
+        formatDate(agent?.created_at),
+        formatDate(agent?.updated_at),
+        actions,
+      ];
+    });
+
+    if (!rows.length) {
+      const wrapper = document.createElement("div");
+      wrapper.appendChild(emptyState("No agents found."));
+      return wrapper;
+    }
+
+    return buildTable(
+      ["Agent ID", "Name", "Runtime", "Status", "Created", "Updated", "Actions"],
+      rows
+    );
+  }
+
+  function setAgentFormState(form, disabled) {
+    if (!form) return;
+    const controls = form.querySelectorAll
+      ? form.querySelectorAll("input, select, button")
+      : form.children || [];
+    if (controls.forEach) {
+      controls.forEach((node) => {
+        if (node) node.disabled = !!disabled;
+      });
+    } else {
+      for (const node of controls) {
+        if (node) node.disabled = !!disabled;
+      }
+    }
+  }
+
+  async function renderAgentsView() {
+    viewTitle.textContent = "Agents";
+    renderBreadcrumbs([{ label: "Agents" }]);
+    setStatus("Loading agents…", "loading");
+    clearContent();
+
+    let agents = [];
+    let editingId = "";
+
+    const container = document.createElement("div");
+    container.className = "agents-view";
+
+    const createForm = document.createElement("form");
+    createForm.className = "card";
+    const createHeader = document.createElement("h3");
+    createHeader.textContent = "Create agent";
+    createForm.appendChild(createHeader);
+    const createName = document.createElement("input");
+    createName.type = "text";
+    createName.placeholder = "Name";
+    const createRuntime = document.createElement("select");
+    AGENT_RUNTIMES.forEach((rt) => {
+      const opt = document.createElement("option");
+      opt.value = rt;
+      opt.textContent = rt;
+      createRuntime.appendChild(opt);
+    });
+    createForm.appendChild(createName);
+    createForm.appendChild(createRuntime);
+    const createSubmit = document.createElement("button");
+    createSubmit.type = "submit";
+    createSubmit.textContent = "Create";
+    createForm.appendChild(createSubmit);
+
+    const editForm = document.createElement("form");
+    editForm.className = "card";
+    const editHeader = document.createElement("h3");
+    editHeader.textContent = "Edit agent";
+    editForm.appendChild(editHeader);
+    const editHint = document.createElement("div");
+    editHint.className = "pill";
+    editHint.textContent = "Select an agent to edit";
+    editForm.appendChild(editHint);
+    const editName = document.createElement("input");
+    editName.type = "text";
+    editName.placeholder = "Name";
+    const editRuntime = document.createElement("select");
+    AGENT_RUNTIMES.forEach((rt) => {
+      const opt = document.createElement("option");
+      opt.value = rt;
+      opt.textContent = rt;
+      editRuntime.appendChild(opt);
+    });
+    editForm.appendChild(editName);
+    editForm.appendChild(editRuntime);
+    const editSubmit = document.createElement("button");
+    editSubmit.type = "submit";
+    editSubmit.textContent = "Update";
+    editSubmit.disabled = true;
+    const editCancel = document.createElement("button");
+    editCancel.type = "button";
+    editCancel.textContent = "Clear";
+    editCancel.disabled = true;
+    editForm.appendChild(editSubmit);
+    editForm.appendChild(editCancel);
+
+    const tableContainer = document.createElement("div");
+    tableContainer.className = "card";
+
+    container.appendChild(createForm);
+    container.appendChild(editForm);
+    container.appendChild(tableContainer);
+    contentEl.appendChild(container);
+
+    function setEditing(agent) {
+      editingId = agent?.agent_id || "";
+      if (editingId) {
+        editHint.textContent = `Editing ${agent.name || editingId}`;
+        editName.value = agent.name || "";
+        editRuntime.value = AGENT_RUNTIMES.includes(agent.runtime) ? agent.runtime : AGENT_RUNTIMES[0];
+        editSubmit.disabled = false;
+        editCancel.disabled = false;
+      } else {
+        editHint.textContent = "Select an agent to edit";
+        editName.value = "";
+        editRuntime.value = AGENT_RUNTIMES[0];
+        editSubmit.disabled = true;
+        editCancel.disabled = true;
+      }
+    }
+
+    function renderTable(list) {
+      tableContainer.innerHTML = "";
+      const table = buildAgentTable(list, {
+        onEdit: setEditing,
+        onDelete: async (agent) => {
+          try {
+            setStatus(`Deleting ${agent.name || agent.agent_id}…`, "loading");
+            await fetchJSON(`/agent/${encodeURIComponent(agent.agent_id)}`, {
+              method: "DELETE",
+            });
+            if (agent.agent_id === editingId) {
+              setEditing(null);
+            }
+            await loadAgents(false);
+            setStatus("Agent deleted", "success");
+          } catch (err) {
+            setStatus(err.message || "Failed to delete agent", "error");
+          }
+        },
+      });
+      tableContainer.appendChild(table);
+    }
+
+    async function loadAgents(showStatus = true) {
+      try {
+        if (showStatus) {
+          setStatus("Loading agents…", "loading");
+        }
+        agents = await fetchAgentsList();
+        if (editingId && !agents.find((a) => a.agent_id === editingId)) {
+          setEditing(null);
+        }
+        renderTable(agents);
+        const count = agents.length;
+        setStatus(`Loaded ${count} agent${count === 1 ? "" : "s"}`, "success");
+      } catch (err) {
+        tableContainer.innerHTML = "";
+        tableContainer.appendChild(emptyState("Unable to load agents."));
+        setStatus(err.message || "Failed to load agents", "error");
+      }
+    }
+
+    createForm.addEventListener("submit", async (evt) => {
+      evt.preventDefault();
+      const name = (createName.value || "").trim();
+      const runtime = (createRuntime.value || "").toLowerCase();
+      if (!name) {
+        setStatus("Name is required", "error");
+        return;
+      }
+      if (!AGENT_RUNTIMES.includes(runtime)) {
+        setStatus("Runtime must be codex or copilot", "error");
+        return;
+      }
+      setAgentFormState(createForm, true);
+      try {
+        setStatus(`Creating ${name}…`, "loading");
+        await fetchJSON("/agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, runtime }),
+        });
+        createName.value = "";
+        createRuntime.value = AGENT_RUNTIMES[0];
+        await loadAgents(false);
+        setStatus("Agent created", "success");
+      } catch (err) {
+        setStatus(err.message || "Failed to create agent", "error");
+      } finally {
+        setAgentFormState(createForm, false);
+      }
+    });
+
+    editCancel.addEventListener("click", () => setEditing(null));
+
+    editForm.addEventListener("submit", async (evt) => {
+      evt.preventDefault();
+      if (!editingId) {
+        setStatus("Select an agent to edit", "error");
+        return;
+      }
+      const name = (editName.value || "").trim();
+      const runtime = (editRuntime.value || "").toLowerCase();
+      if (!name) {
+        setStatus("Name is required", "error");
+        return;
+      }
+      if (!AGENT_RUNTIMES.includes(runtime)) {
+        setStatus("Runtime must be codex or copilot", "error");
+        return;
+      }
+      setAgentFormState(editForm, true);
+      try {
+        setStatus(`Updating ${name}…`, "loading");
+        await fetchJSON(`/agent/${encodeURIComponent(editingId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, runtime }),
+        });
+        await loadAgents(false);
+        setStatus("Agent updated", "success");
+      } catch (err) {
+        setStatus(err.message || "Failed to update agent", "error");
+      } finally {
+        setAgentFormState(editForm, false);
+      }
+    });
+
+    await loadAgents(false);
   }
 
   function buildTable(headers, rows) {
@@ -1711,6 +1988,13 @@
       renderNav,
       routeApp,
     };
+    module.exports.AgentsView = {
+      renderAgentsView,
+      fetchAgentsList,
+      getRouteFromHash,
+      renderNav,
+      routeApp,
+    };
   }
 
   function getRouteFromHash(rawHash) {
@@ -1719,6 +2003,7 @@
     if (!normalized) return "";
     const [path] = normalized.split(/[?#]/);
     if (path === "version") return "version";
+    if (path === "agents") return "agents";
     return "";
   }
 
@@ -1731,6 +2016,10 @@
     if (batchParam) {
       renderNav("batches");
       return renderRuns(batchParam);
+    }
+    if (route === "agents") {
+      renderNav("agents");
+      return renderAgentsView();
     }
     if (route === "version") {
       renderNav("version");
