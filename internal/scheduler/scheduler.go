@@ -122,6 +122,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 // from starting by enabling draining. Stub implementation; callers should
 // invoke WaitForIdle to block until in-flight work completes.
 func (s *Scheduler) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
 	_ = ctx
 	s.SetDraining(true)
 	return nil

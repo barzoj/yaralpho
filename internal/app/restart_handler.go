@@ -58,6 +58,8 @@ func (a *App) restartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.requestShutdown()
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":      "drained",
 		"active_runs": a.scheduler.ActiveCount(),

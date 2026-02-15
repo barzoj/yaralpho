@@ -31,6 +31,7 @@ type schedulerController interface {
 	ActiveCount() int
 	WaitForIdle(ctx context.Context) error
 	Tick(ctx context.Context) error
+	Stop(ctx context.Context) error
 }
 
 var (
@@ -58,20 +59,22 @@ var (
 // consumer. Run starts the HTTP server and consumer and blocks until context
 // cancellation or a fatal error.
 type App struct {
-	cfg        config.Config
-	logger     *zap.Logger
-	storage    storage.Storage
-	tracker    tracker.Tracker
-	notifier   notify.Notifier
-	copilot    copilot.Client
-	scheduler  schedulerController
-	router     *mux.Router
-	server     *http.Server
-	closers    []func(context.Context) error
-	started    uint32
-	reqCounter uint64
-	wg         sync.WaitGroup
-	eventBus   bus.Bus
+	cfg          config.Config
+	logger       *zap.Logger
+	storage      storage.Storage
+	tracker      tracker.Tracker
+	notifier     notify.Notifier
+	copilot      copilot.Client
+	scheduler    schedulerController
+	router       *mux.Router
+	server       *http.Server
+	closers      []func(context.Context) error
+	started      uint32
+	reqCounter   uint64
+	wg           sync.WaitGroup
+	eventBus     bus.Bus
+	runCancel    context.CancelFunc
+	shutdownOnce sync.Once
 }
 
 // Build constructs the production App using concrete implementations. All
@@ -206,6 +209,8 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
+	a.shutdownOnce = sync.Once{}
+	a.runCancel = cancel
 	defer cancel()
 
 	errCh := make(chan error, 2)
@@ -237,6 +242,10 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	}
 
+	if a.scheduler != nil {
+		_ = a.scheduler.Stop(context.Background())
+	}
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
@@ -258,6 +267,20 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (a *App) requestShutdown() {
+	if a == nil {
+		return
+	}
+	a.shutdownOnce.Do(func() {
+		if a.scheduler != nil {
+			_ = a.scheduler.Stop(context.Background())
+		}
+		if a.runCancel != nil {
+			a.runCancel()
+		}
+	})
 }
 
 func (a *App) logConfigValues() {

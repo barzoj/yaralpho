@@ -105,6 +105,7 @@ func (f *fakeScheduler) SetDraining(draining bool)      { f.draining = draining 
 func (f *fakeScheduler) Draining() bool                 { return f.draining }
 func (f *fakeScheduler) ActiveCount() int               { return f.active }
 func (f *fakeScheduler) Tick(ctx context.Context) error { return nil }
+func (f *fakeScheduler) Stop(ctx context.Context) error { return nil }
 func (f *fakeScheduler) WaitForIdle(ctx context.Context) error {
 	f.waitCalled = true
 	if f.waitCh != nil {

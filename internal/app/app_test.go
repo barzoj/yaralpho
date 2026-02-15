@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,7 +96,9 @@ func (f *fakeStorage) Close(ctx context.Context) error {
 
 type fakeTracker struct{}
 
-func (fakeTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error { return nil }
+func (fakeTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error {
+	return nil
+}
 func (fakeTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	return nil, nil
 }
@@ -306,6 +309,7 @@ func (fakeSchedulerController) Draining() bool                        { return f
 func (fakeSchedulerController) ActiveCount() int                      { return 0 }
 func (fakeSchedulerController) WaitForIdle(ctx context.Context) error { return nil }
 func (fakeSchedulerController) Tick(ctx context.Context) error        { return nil }
+func (fakeSchedulerController) Stop(ctx context.Context) error        { return nil }
 
 type tickingScheduler struct {
 	tickCount int
@@ -318,6 +322,139 @@ func (t *tickingScheduler) WaitForIdle(ctx context.Context) error { <-ctx.Done()
 func (t *tickingScheduler) Tick(ctx context.Context) error {
 	t.tickCount++
 	return ctx.Err()
+}
+func (t *tickingScheduler) Stop(ctx context.Context) error { _ = ctx; return nil }
+
+type drainingScheduler struct {
+	active     atomic.Int64
+	draining   atomic.Bool
+	waitCalled atomic.Bool
+	waitCh     chan struct{}
+	waitErr    error
+	stopCount  atomic.Int64
+}
+
+func (d *drainingScheduler) SetDraining(draining bool) { d.draining.Store(draining) }
+func (d *drainingScheduler) Draining() bool            { return d.draining.Load() }
+func (d *drainingScheduler) ActiveCount() int          { return int(d.active.Load()) }
+func (d *drainingScheduler) WaitForIdle(ctx context.Context) error {
+	d.waitCalled.Store(true)
+	if d.waitCh == nil {
+		return d.waitErr
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-d.waitCh:
+		return d.waitErr
+	}
+}
+func (d *drainingScheduler) Tick(ctx context.Context) error { return ctx.Err() }
+func (d *drainingScheduler) Stop(ctx context.Context) error {
+	_ = ctx
+	d.draining.Store(true)
+	d.stopCount.Add(1)
+	return nil
+}
+
+func TestRestartWaitTriggersShutdown(t *testing.T) {
+	st := newHandlerTestStorage()
+	app := newTestApp(t, st)
+	if cfg, ok := app.cfg.(fakeConfig); ok {
+		cfg[config.RestartWaitTimeoutKey] = "200ms"
+	}
+
+	sched := &drainingScheduler{waitCh: make(chan struct{})}
+	sched.active.Store(1)
+	app.SetScheduler(sched)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- app.Run(runCtx)
+	}()
+
+	// Allow server goroutine to start.
+	time.Sleep(10 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/restart?wait=true", nil)
+	rec := httptest.NewRecorder()
+	handlerDone := make(chan struct{})
+	go func() {
+		app.Router().ServeHTTP(rec, req)
+		close(handlerDone)
+	}()
+
+	select {
+	case <-handlerDone:
+		t.Fatalf("handler returned before draining completed")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	sched.active.Store(0)
+	close(sched.waitCh)
+
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatalf("handler did not return after scheduler drained")
+	}
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, sched.waitCalled.Load())
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	require.Contains(t, rec.Body.String(), `"status":"drained"`)
+	require.GreaterOrEqual(t, sched.stopCount.Load(), int64(1))
+
+	select {
+	case err := <-runDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatalf("app did not shut down after restart wait")
+	}
+}
+
+func TestRestartNoWaitKeepsRunning(t *testing.T) {
+	st := newHandlerTestStorage()
+	app := newTestApp(t, st)
+
+	sched := &drainingScheduler{}
+	sched.active.Store(2)
+	app.SetScheduler(sched)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- app.Run(runCtx)
+	}()
+
+	// Allow server goroutine to start.
+	time.Sleep(10 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/restart", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.True(t, sched.draining.Load())
+	require.False(t, sched.waitCalled.Load())
+	require.Equal(t, int64(0), sched.stopCount.Load())
+
+	select {
+	case err := <-runDone:
+		t.Fatalf("app exited unexpectedly: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	runCancel()
+	select {
+	case err := <-runDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatalf("app did not exit after cancellation")
+	}
 }
 
 func TestRunScheduler_TicksUntilContextCancel(t *testing.T) {

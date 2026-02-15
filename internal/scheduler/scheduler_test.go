@@ -108,6 +108,18 @@ func TestSchedulerTick_LogsRetryExhaustion(t *testing.T) {
 	assertContextField(t, failEntry, "max_retries", 1)
 }
 
+func TestSchedulerStopEnablesDraining(t *testing.T) {
+	s := New(nil, nil, zap.NewNop(), Options{})
+	require.False(t, s.Draining())
+
+	err := s.Stop(context.Background())
+	require.NoError(t, err)
+	require.True(t, s.Draining())
+
+	err = s.Tick(context.Background())
+	require.NoError(t, err)
+}
+
 func assertField(t *testing.T, fields []zap.Field, key string, value any) {
 	t.Helper()
 	for _, f := range fields {
