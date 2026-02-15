@@ -290,6 +290,24 @@
     return body;
   }
 
+  const batchCache = new Map();
+
+  async function fetchBatchDetail(batchId) {
+    if (!batchId) {
+      throw new Error("Batch ID is required");
+    }
+    if (batchCache.has(batchId)) {
+      return batchCache.get(batchId);
+    }
+    const data = await fetchJSON(`/batches/${encodeURIComponent(batchId)}`);
+    const batch = data?.batch || data;
+    if (!batch || !batch.batch_id) {
+      throw new Error("Batch not found");
+    }
+    batchCache.set(batchId, batch);
+    return batch;
+  }
+
   function buildTable(headers, rows) {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
@@ -911,26 +929,44 @@
   }
 
   async function renderRuns(batchId) {
-	viewTitle.textContent = `Runs for ${batchId}`;
-	renderBreadcrumbs([
-	  { label: "Batches", href: "/app" },
-	  { label: batchId },
-	]);
-	setStatus("Loading runs…", "loading");
-	clearContent();
+    setStatus("Loading runs…", "loading");
+    clearContent();
+
+    let batchDetail;
+    try {
+      batchDetail = await fetchBatchDetail(batchId);
+    } catch (err) {
+      contentEl.appendChild(emptyState("Unable to load batch details."));
+      setStatus(err.message || "Failed to load runs", "error");
+      return;
+    }
+
+    const repoId = batchDetail?.repository_id;
+    if (!repoId) {
+      contentEl.appendChild(emptyState("Batch is missing repository context."));
+      setStatus("Unable to load runs (no repository id)", "error");
+      return;
+    }
+
+    const batchLabel = batchDetail.session_name || batchDetail.batch_id || batchId;
+    viewTitle.textContent = `Runs for ${batchLabel}`;
+    renderBreadcrumbs([
+      { label: "Batches", href: "/app" },
+      { label: batchLabel },
+    ]);
+    clearContent();
 
     const actions = document.createElement("div");
     actions.className = "actions";
     actions.appendChild(createButtonLink("/app", "Back to batches"));
     contentEl.appendChild(actions);
 
-	try {
-	  const repoId = await deriveRepositoryIdForBatch(batchId);
-	  const data = await fetchJSON(
-	    `/repository/${encodeURIComponent(
-	      repoId
-	    )}/batch/${encodeURIComponent(batchId)}/runs?limit=${LIST_LIMIT}`
-	  );
+    try {
+      const data = await fetchJSON(
+        `/repository/${encodeURIComponent(
+          repoId
+        )}/batch/${encodeURIComponent(batchId)}/runs?limit=${LIST_LIMIT}`
+      );
       const runs = data.runs || [];
       if (!runs.length) {
         contentEl.appendChild(emptyState("No runs for this batch."));
@@ -1417,9 +1453,21 @@
 
     const run = runData.run || {};
     const batchId = run.batch_id || batchIdFromQuery || "";
+    let batchLabel = batchId ? `Batch ${batchId}` : "";
+    try {
+      const batchDetail = batchId ? await fetchBatchDetail(batchId) : null;
+      if (batchDetail) {
+        const name = batchDetail.session_name;
+        batchLabel = name ? `${name} (${batchDetail.batch_id})` : `Batch ${batchDetail.batch_id}`;
+      }
+    } catch (_) {
+      // non-fatal; fallback to raw batch id
+    }
     renderBreadcrumbs([
       { label: "Batches", href: "/app" },
-      batchId ? { label: `Batch ${batchId}`, href: `/app?batch=${encodeURIComponent(batchId)}` } : null,
+      batchId
+        ? { label: batchLabel, href: `/app?batch=${encodeURIComponent(batchId)}` }
+        : null,
       { label: `Run ${runId}` },
     ].filter(Boolean));
 
