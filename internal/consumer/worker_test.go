@@ -40,7 +40,7 @@ func TestWorker_TaskPromptAndEvents(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify base",
 	}
 
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
 	nextRun := 0
 	w.newRunID = func() string {
 		nextRun++
@@ -105,7 +105,7 @@ func TestWorker_StopsOnSessionIdleEvent(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
 	nextRun := 0
 	w.newRunID = func() string {
 		nextRun++
@@ -159,7 +159,7 @@ func TestWorker_ExecutionListHappyPath(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
 	startRun := 1
 	w.newRunID = func() string {
 		id := fmt.Sprintf("run-%d", startRun)
@@ -220,7 +220,7 @@ func TestWorker_StartSessionErrorMarksFailed(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
 	w.newRunID = func() string { return "run-fail" }
 	w.now = func() time.Time { return time.Date(2026, 2, 8, 14, 0, 0, 0, time.UTC) }
 
@@ -252,7 +252,7 @@ func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 		config.VerificationTaskPromptKey: "verify",
 	}
 
-	w := NewWorker(tr, cp, st, nt, cfg, "/repo", zap.NewNop())
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -659,15 +659,15 @@ type fakeTracker struct {
 	titles map[string]string
 }
 
-func (f *fakeTracker) AddComment(ctx context.Context, ref string, text string) error {
+func (f *fakeTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error {
 	return nil
 }
 
-func (f *fakeTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+func (f *fakeTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	return []tracker.Comment{}, nil
 }
 
-func (f *fakeTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+func (f *fakeTracker) GetTitle(ctx context.Context, repoPath, ref string) (string, error) {
 	if f.titles == nil {
 		return "", nil
 	}
@@ -675,6 +675,7 @@ func (f *fakeTracker) GetTitle(ctx context.Context, ref string) (string, error) 
 }
 
 type fakeStorage struct {
+	repositories     map[string]storage.Repository
 	batches          map[string]storage.Batch
 	runs             map[string]storage.TaskRun
 	sessionEvents    []storage.SessionEvent
@@ -683,24 +684,46 @@ type fakeStorage struct {
 
 func newFakeStorage() *fakeStorage {
 	return &fakeStorage{
-		batches: make(map[string]storage.Batch),
-		runs:    make(map[string]storage.TaskRun),
+		repositories: map[string]storage.Repository{
+			"repo-1": {ID: "repo-1", Path: "/repo"},
+		},
+		batches:      make(map[string]storage.Batch),
+		runs:         make(map[string]storage.TaskRun),
 	}
 }
 
 func (f *fakeStorage) CreateRepository(ctx context.Context, repo *storage.Repository) error {
+	if repo == nil {
+		return errors.New("repo is nil")
+	}
+	f.repositories[repo.ID] = *repo
 	return nil
 }
 func (f *fakeStorage) UpdateRepository(ctx context.Context, repo *storage.Repository) error {
+	if repo == nil {
+		return errors.New("repo is nil")
+	}
+	f.repositories[repo.ID] = *repo
 	return nil
 }
 func (f *fakeStorage) GetRepository(ctx context.Context, id string) (*storage.Repository, error) {
-	return nil, errors.New("not found")
+	repo, ok := f.repositories[id]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return &repo, nil
 }
 func (f *fakeStorage) ListRepositories(ctx context.Context) ([]storage.Repository, error) {
-	return nil, nil
+	repos := make([]storage.Repository, 0, len(f.repositories))
+	for _, r := range f.repositories {
+		repos = append(repos, r)
+	}
+	return repos, nil
 }
-func (f *fakeStorage) DeleteRepository(ctx context.Context, id string) error { return nil }
+func (f *fakeStorage) DeleteRepository(ctx context.Context, id string) error {
+	delete(f.repositories, id)
+	return nil
+}
 func (f *fakeStorage) RepositoryHasActiveBatches(ctx context.Context, id string) (bool, error) {
 	for _, b := range f.batches {
 		if b.RepositoryID == id && b.Status != storage.BatchStatusDone && b.Status != storage.BatchStatusFailed {
@@ -719,6 +742,9 @@ func (f *fakeStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) {
 func (f *fakeStorage) DeleteAgent(ctx context.Context, id string) error        { return nil }
 
 func (f *fakeStorage) CreateBatch(ctx context.Context, batch *storage.Batch) error {
+	if batch.RepositoryID == "" {
+		batch.RepositoryID = "repo-1"
+	}
 	f.batches[batch.ID] = *batch
 	return nil
 }
@@ -733,6 +759,9 @@ func (f *fakeStorage) GetBatch(ctx context.Context, batchID string) (*storage.Ba
 	b, ok := f.batches[batchID]
 	if !ok {
 		return nil, errors.New("not found")
+	}
+	if b.RepositoryID == "" {
+		b.RepositoryID = "repo-1"
 	}
 	return &b, nil
 }

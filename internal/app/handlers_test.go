@@ -237,12 +237,12 @@ func (s *handlerTestStorage) GetBatchProgress(ctx context.Context, batchID strin
 
 type noopTracker struct{}
 
-func (noopTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
-func (noopTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+func (noopTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error { return nil }
+func (noopTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	return nil, nil
 }
 
-func (noopTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+func (noopTracker) GetTitle(ctx context.Context, repoPath, ref string) (string, error) {
 	return "", nil
 }
 
@@ -280,7 +280,6 @@ func newTestAppWithLogger(t *testing.T, st *handlerTestStorage, logger *zap.Logg
 		config.MongoURIKey: "mongodb://example",
 		config.MongoDBKey:  "db",
 		config.RepoPathKey: "/repo",
-		config.BdRepoKey:   "/bd",
 	}
 
 	if logger == nil {

@@ -22,7 +22,6 @@ const (
 	MongoURIKey               = "YARALPHO_MONGODB_URI"
 	MongoDBKey                = "YARALPHO_MONGODB_DB"
 	RepoPathKey               = "YARALPHO_REPO_PATH"
-	BdRepoKey                 = "YARALPHO_BD_REPO"
 	PortKey                   = "YARALPHO_PORT"
 	SlackWebhookKey           = "YARALPHO_SLACK_WEBHOOK_URL"
 	MaxRetriesKey             = "YARALPHO_MAX_RETRIES"
@@ -91,7 +90,6 @@ var requiredKeys = []string{
 	MongoURIKey,
 	MongoDBKey,
 	RepoPathKey,
-	BdRepoKey,
 	PortKey,
 }
 
@@ -99,7 +97,6 @@ var envOverrideKeys = []string{
 	MongoURIKey,
 	MongoDBKey,
 	RepoPathKey,
-	BdRepoKey,
 	PortKey,
 	SlackWebhookKey,
 	MaxRetriesKey,
@@ -120,7 +117,6 @@ func LoggableKeys() []string {
 		MongoURIKey,
 		MongoDBKey,
 		RepoPathKey,
-		BdRepoKey,
 		PortKey,
 		MaxRetriesKey,
 		SchedulerIntervalKey,

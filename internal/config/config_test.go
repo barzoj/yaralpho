@@ -19,7 +19,6 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
         "YARALPHO_MONGODB_URI": "json-uri",
         "YARALPHO_MONGODB_DB": "json-db",
         "YARALPHO_REPO_PATH": "/json/repo",
-        "YARALPHO_BD_REPO": "json-bd",
         "YARALPHO_PORT": "7000",
         "YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json",
         "YARALPHO_MAX_RETRIES": "3",
@@ -88,7 +87,6 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	t.Setenv(MongoURIKey, "mongo")
 	t.Setenv(MongoDBKey, "db")
 	t.Setenv(RepoPathKey, "/repo")
-	t.Setenv(BdRepoKey, "bd/repo")
 	t.Setenv(PortKey, "")
 	t.Setenv(SlackWebhookKey, "")
 	t.Setenv(MaxRetriesKey, "")
@@ -140,7 +138,6 @@ func TestLoadWithPath_WarnsOnEnvOverride(t *testing.T) {
 		"YARALPHO_MONGODB_URI": "json-uri",
 		"YARALPHO_MONGODB_DB": "json-db",
 		"YARALPHO_REPO_PATH": "/json/repo",
-		"YARALPHO_BD_REPO": "json-bd",
 		"YARALPHO_PORT": "8080",
 		"YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json"
 	}`)
@@ -169,7 +166,6 @@ func TestLoadWithPath_NoWarningWhenOnlyOneSourceProvidesValue(t *testing.T) {
 	content := []byte(`{
 		"YARALPHO_MONGODB_DB": "json-db",
 		"YARALPHO_REPO_PATH": "/json/repo",
-		"YARALPHO_BD_REPO": "json-bd",
 		"YARALPHO_PORT": "8080",
 		"COPILOT_GITHUB_TOKEN": "json-token"
 	}`)
@@ -193,7 +189,6 @@ func TestLoadWithPath_SecretOverrideDoesNotLogRawValues(t *testing.T) {
 		"YARALPHO_MONGODB_URI": "json-uri",
 		"YARALPHO_MONGODB_DB": "json-db",
 		"YARALPHO_REPO_PATH": "/json/repo",
-		"YARALPHO_BD_REPO": "json-bd",
 		"YARALPHO_PORT": "8080",
 		"YARALPHO_SLACK_WEBHOOK_URL": "https://example.com/json-secret"
 	}`)

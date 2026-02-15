@@ -80,7 +80,7 @@ func (t *ExecutionTask) Execute(ctx context.Context, batch *storage.Batch, taskI
 		basePrompt = fmt.Sprintf(basePrompt, taskID)
 	}
 
-	comments, err := t.tracker.FetchComments(ctx, taskID)
+	comments, err := t.tracker.FetchComments(ctx, t.repoPath, taskID)
 	if err != nil {
 		return storage.TaskRunStatusFailed, "", fmt.Errorf("fetch tracker comments: %w", err)
 	}

@@ -116,18 +116,13 @@ func BuildWithOptions(ctx context.Context, logger *zap.Logger, cfg config.Config
 		return nil, fmt.Errorf("init notifier: %w", err)
 	}
 
-	repoPath, err := cfg.Get(config.RepoPathKey)
-	if err != nil {
-		return nil, fmt.Errorf("get repo path: %w", err)
-	}
-
 	cp := copilot.NewCodex(logger)
 	application, err := New(logger, cfg, st, tr, nt, cp)
 	if err != nil {
 		return nil, err
 	}
 
-	worker := consumer.NewWorker(tr, cp, st, nt, cfg, repoPath, logger)
+	worker := consumer.NewWorker(tr, cp, st, nt, cfg, logger)
 	schedOpts := schedulerOptionsFromConfig(cfg, logger)
 	application.SetScheduler(newScheduler(st, worker, logger, schedOpts))
 

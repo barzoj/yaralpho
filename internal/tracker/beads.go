@@ -22,50 +22,22 @@ type commandRunner func(ctx context.Context, dir string, args ...string) ([]byte
 // Beads implements Tracker by invoking the beads CLI (`bd show <ref>`) inside
 // the configured repository path.
 type Beads struct {
-	repoPath string
-	logger   *zap.Logger
-	timeout  time.Duration
-	run      commandRunner
+	logger  *zap.Logger
+	timeout time.Duration
+	run     commandRunner
 }
 
 // NewBeads constructs a Beads tracker using the configured beads repository
 // path. Logger defaults to zap.NewNop and timeout defaults to five seconds.
 func NewBeads(cfg config.Config, logger *zap.Logger) (*Beads, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
-	}
-
-	repoPath, err := cfg.Get(config.BdRepoKey)
-	if err != nil {
-		return nil, fmt.Errorf("bd repo: %w", err)
-	}
-	repoPath = strings.TrimSpace(repoPath)
-	if repoPath == "" {
-		return nil, fmt.Errorf("bd repo is empty")
-	}
-
-	repoPath, err = filepath.Abs(repoPath)
-	if err != nil {
-		return nil, fmt.Errorf("bd repo abs: %w", err)
-	}
-
-	info, err := os.Stat(repoPath)
-	if err != nil {
-		return nil, fmt.Errorf("bd repo: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("bd repo is not a directory: %s", repoPath)
-	}
-
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
 	return &Beads{
-		repoPath: repoPath,
-		logger:   logger,
-		timeout:  defaultBeadsTimeout,
-		run:      defaultCommandRunner,
+		logger:  logger,
+		timeout: defaultBeadsTimeout,
+		run:     defaultCommandRunner,
 	}, nil
 }
 
@@ -80,12 +52,39 @@ func defaultCommandRunner(ctx context.Context, dir string, args ...string) ([]by
 	return cmd.CombinedOutput()
 }
 
+func (b *Beads) normalizeRepoPath(repoPath string) (string, error) {
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return "", fmt.Errorf("repo path is required")
+	}
+
+	absPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("repo path abs: %w", err)
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", fmt.Errorf("repo path: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("repo path is not a directory: %s", absPath)
+	}
+
+	return absPath, nil
+}
+
 // AddComment is a placeholder implementation that will be wired to bd
 // comments in subsequent tasks.
-func (b *Beads) AddComment(ctx context.Context, ref string, text string) error {
+func (b *Beads) AddComment(ctx context.Context, repoPath string, ref string, text string) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return fmt.Errorf("ref is required")
+	}
+
+	repoPath, err := b.normalizeRepoPath(repoPath)
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
@@ -118,11 +117,11 @@ func (b *Beads) AddComment(ctx context.Context, ref string, text string) error {
 		args = append(args, text)
 	}
 
-	if _, err := b.run(ctx, b.repoPath, args...); err != nil {
+	if _, err := b.run(ctx, repoPath, args...); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		b.logger.Error("bd comments add failed", zap.String("ref", ref), zap.Error(err))
+		b.logger.Error("bd comments add failed", zap.String("ref", ref), zap.String("repo_path", repoPath), zap.Error(err))
 		return fmt.Errorf("bd comments add %s: %w", ref, err)
 	}
 
@@ -130,10 +129,15 @@ func (b *Beads) AddComment(ctx context.Context, ref string, text string) error {
 }
 
 // FetchComments currently returns no comments; bd wiring will be added later.
-func (b *Beads) FetchComments(ctx context.Context, ref string) ([]Comment, error) {
+func (b *Beads) FetchComments(ctx context.Context, repoPath string, ref string) ([]Comment, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil, fmt.Errorf("ref is required")
+	}
+
+	repoPath, err := b.normalizeRepoPath(repoPath)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
@@ -143,12 +147,12 @@ func (b *Beads) FetchComments(ctx context.Context, ref string) ([]Comment, error
 		return nil, err
 	}
 
-	output, err := b.run(ctx, b.repoPath, "bd", "view", ref, "--json")
+	output, err := b.run(ctx, repoPath, "bd", "view", ref, "--json")
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		b.logger.Error("bd view failed", zap.String("ref", ref), zap.Error(err))
+		b.logger.Error("bd view failed", zap.String("ref", ref), zap.String("repo_path", repoPath), zap.Error(err))
 		return nil, fmt.Errorf("bd view %s: %w", ref, err)
 	}
 
@@ -163,7 +167,7 @@ func (b *Beads) FetchComments(ctx context.Context, ref string) ([]Comment, error
 		} `json:"comments"`
 	}
 	if err := json.Unmarshal(output, &issues); err != nil {
-		b.logger.Error("parse bd view failed", zap.String("ref", ref), zap.Error(err))
+		b.logger.Error("parse bd view failed", zap.String("ref", ref), zap.String("repo_path", repoPath), zap.Error(err))
 		return nil, fmt.Errorf("parse bd view %s: %w", ref, err)
 	}
 	if len(issues) == 0 {
@@ -218,10 +222,15 @@ func (b *Beads) FetchComments(ctx context.Context, ref string) ([]Comment, error
 }
 
 // GetTitle returns the issue title for the given reference.
-func (b *Beads) GetTitle(ctx context.Context, ref string) (string, error) {
+func (b *Beads) GetTitle(ctx context.Context, repoPath string, ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", fmt.Errorf("ref is required")
+	}
+
+	repoPath, err := b.normalizeRepoPath(repoPath)
+	if err != nil {
+		return "", err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
@@ -231,12 +240,12 @@ func (b *Beads) GetTitle(ctx context.Context, ref string) (string, error) {
 		return "", err
 	}
 
-	output, err := b.run(ctx, b.repoPath, "bd", "view", ref, "--json")
+	output, err := b.run(ctx, repoPath, "bd", "view", ref, "--json")
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		b.logger.Error("bd view failed", zap.String("ref", ref), zap.Error(err))
+		b.logger.Error("bd view failed", zap.String("ref", ref), zap.String("repo_path", repoPath), zap.Error(err))
 		return "", fmt.Errorf("bd view %s: %w", ref, err)
 	}
 
@@ -245,7 +254,7 @@ func (b *Beads) GetTitle(ctx context.Context, ref string) (string, error) {
 		Title string `json:"title"`
 	}
 	if err := json.Unmarshal(output, &issues); err != nil {
-		b.logger.Error("parse bd view failed", zap.String("ref", ref), zap.Error(err))
+		b.logger.Error("parse bd view failed", zap.String("ref", ref), zap.String("repo_path", repoPath), zap.Error(err))
 		return "", fmt.Errorf("parse bd view %s: %w", ref, err)
 	}
 	if len(issues) == 0 {

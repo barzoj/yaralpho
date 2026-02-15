@@ -95,11 +95,12 @@ type stubExecutionTracker struct {
 	refs     []string
 }
 
-func (s *stubExecutionTracker) AddComment(ctx context.Context, ref string, text string) error {
+func (s *stubExecutionTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error {
 	return nil
 }
 
-func (s *stubExecutionTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+
+func (s *stubExecutionTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	s.refs = append(s.refs, ref)
 	if s.err != nil {
 		return nil, s.err
@@ -107,6 +108,6 @@ func (s *stubExecutionTracker) FetchComments(ctx context.Context, ref string) ([
 	return s.comments, nil
 }
 
-func (s *stubExecutionTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+func (s *stubExecutionTracker) GetTitle(ctx context.Context, repoPath, ref string) (string, error) {
 	return "", nil
 }

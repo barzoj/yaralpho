@@ -95,12 +95,12 @@ func (f *fakeStorage) Close(ctx context.Context) error {
 
 type fakeTracker struct{}
 
-func (fakeTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
-func (fakeTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+func (fakeTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error { return nil }
+func (fakeTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	return nil, nil
 }
 
-func (fakeTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+func (fakeTracker) GetTitle(ctx context.Context, repoPath, ref string) (string, error) {
 	return "", nil
 }
 
@@ -145,7 +145,6 @@ func TestHealthRoute(t *testing.T) {
 		config.MongoURIKey: "mongodb://example",
 		config.MongoDBKey:  "db",
 		config.RepoPathKey: "/repo",
-		config.BdRepoKey:   "/repo",
 	}
 
 	st := &fakeStorage{}
@@ -174,7 +173,6 @@ func TestVersionRoute(t *testing.T) {
 		config.MongoURIKey: "mongodb://example",
 		config.MongoDBKey:  "db",
 		config.RepoPathKey: "/repo",
-		config.BdRepoKey:   "/repo",
 	}
 
 	st := &fakeStorage{}
@@ -203,7 +201,6 @@ func TestVersionRouteDefaultsToDev(t *testing.T) {
 		config.MongoURIKey: "mongodb://example",
 		config.MongoDBKey:  "db",
 		config.RepoPathKey: "/repo",
-		config.BdRepoKey:   "/repo",
 	}
 
 	st := &fakeStorage{}
@@ -229,7 +226,6 @@ func TestBuildWithOptions_SameAsBuild(t *testing.T) {
 		config.MongoURIKey: "mongodb://example",
 		config.MongoDBKey:  "db",
 		config.RepoPathKey: "/repo",
-		config.BdRepoKey:   "/repo",
 	}
 
 	origNewStorage := newStorage
@@ -264,7 +260,6 @@ func TestBuildWithOptions_WiresSchedulerOptionsFromConfig(t *testing.T) {
 		config.MongoURIKey:          "mongodb://example",
 		config.MongoDBKey:           "db",
 		config.RepoPathKey:          "/repo",
-		config.BdRepoKey:            "/repo",
 		config.SchedulerIntervalKey: "250ms",
 		config.MaxRetriesKey:        "9",
 	}
@@ -331,7 +326,6 @@ func TestRunScheduler_TicksUntilContextCancel(t *testing.T) {
 		config.MongoURIKey:          "mongodb://example",
 		config.MongoDBKey:           "db",
 		config.RepoPathKey:          "/repo",
-		config.BdRepoKey:            "/bd",
 		config.SchedulerIntervalKey: "5ms",
 	}
 

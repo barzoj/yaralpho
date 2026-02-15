@@ -2,15 +2,21 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/barzoj/yaralpho/internal/storage"
+	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestIntegration_CreateBatchStartsPending(t *testing.T) {
@@ -89,6 +95,31 @@ func TestIntegration_PauseThenResumeBatch(t *testing.T) {
 	batch = getBatch(t, h, batchID)
 	require.Equal(t, storage.BatchStatusDone, batch.Status)
 	require.Equal(t, storage.ItemStatusDone, batch.Items[0].Status)
+}
+
+func TestIntegration_TrackerUsesRepoPathForBdCommands(t *testing.T) {
+	repoPath := t.TempDir()
+	binDir := t.TempDir()
+	logFile := filepath.Join(binDir, "bd-log.txt")
+	scriptPath := filepath.Join(binDir, "bd")
+
+	script := fmt.Sprintf(`#!/bin/sh
+pwd > "%s"
+if [ "$1" = "view" ]; then echo '[{"id":"task-1","title":"Task One"}]'; fi
+`, logFile)
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	beads, err := tracker.NewBeads(mapConfig{values: map[string]string{}}, zap.NewNop())
+	require.NoError(t, err)
+
+	title, err := beads.GetTitle(context.Background(), repoPath, "task-1")
+	require.NoError(t, err)
+	require.Equal(t, "Task One", title)
+
+	data, err := os.ReadFile(logFile)
+	require.NoError(t, err)
+	require.Equal(t, repoPath, strings.TrimSpace(string(data)))
 }
 
 // Helpers

@@ -18,11 +18,11 @@ type stubTracker struct {
 	title string
 }
 
-func (s stubTracker) AddComment(ctx context.Context, ref string, text string) error { return nil }
-func (s stubTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+func (s stubTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error { return nil }
+func (s stubTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	return nil, nil
 }
-func (s stubTracker) GetTitle(ctx context.Context, ref string) (string, error) { return s.title, nil }
+func (s stubTracker) GetTitle(ctx context.Context, repoPath, ref string) (string, error) { return s.title, nil }
 
 type taskNotifier struct {
 	finished []taskFinished

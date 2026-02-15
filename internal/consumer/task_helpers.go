@@ -49,7 +49,7 @@ func executeTask(
 	runID := newRunID()
 	taskName := ""
 	if tr != nil {
-		name, err := tr.GetTitle(ctx, runRef)
+		name, err := tr.GetTitle(ctx, repoPath, runRef)
 		if err != nil {
 			logger.Warn("fetch task title", zap.Error(err), zap.String("task_ref", runRef))
 		} else {

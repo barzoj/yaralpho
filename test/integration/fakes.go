@@ -306,7 +306,7 @@ func newFakeTracker() *fakeTracker {
 	return &fakeTracker{comments: make(map[string][]tracker.Comment)}
 }
 
-func (f *fakeTracker) AddComment(ctx context.Context, ref string, text string) error {
+func (f *fakeTracker) AddComment(ctx context.Context, repoPath, ref string, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.comments[ref] = append(f.comments[ref], tracker.Comment{
@@ -318,13 +318,13 @@ func (f *fakeTracker) AddComment(ctx context.Context, ref string, text string) e
 	return nil
 }
 
-func (f *fakeTracker) FetchComments(ctx context.Context, ref string) ([]tracker.Comment, error) {
+func (f *fakeTracker) FetchComments(ctx context.Context, repoPath, ref string) ([]tracker.Comment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]tracker.Comment(nil), f.comments[ref]...), nil
 }
 
-func (f *fakeTracker) GetTitle(ctx context.Context, ref string) (string, error) {
+func (f *fakeTracker) GetTitle(ctx context.Context, repoPath, ref string) (string, error) {
 	return "", nil
 }
 

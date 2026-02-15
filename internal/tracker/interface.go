@@ -19,13 +19,13 @@ type Comment struct {
 // types and must respect context cancellation for remote calls.
 type Tracker interface {
 	// AddComment adds a tracker comment to the given reference.
-	AddComment(ctx context.Context, ref string, text string) error
+	AddComment(ctx context.Context, repoPath string, ref string, text string) error
 
 	// FetchComments returns tracker comments for the given reference, ordered
 	// as provided by the backend. Implementations should return an empty
 	// slice when no comments exist.
-	FetchComments(ctx context.Context, ref string) ([]Comment, error)
+	FetchComments(ctx context.Context, repoPath string, ref string) ([]Comment, error)
 
 	// GetTitle returns the issue title for the given reference.
-	GetTitle(ctx context.Context, ref string) (string, error)
+	GetTitle(ctx context.Context, repoPath string, ref string) (string, error)
 }
