@@ -1438,15 +1438,19 @@
         const label = document.createElement("div");
         label.className = "pill";
         label.textContent = key;
-        const text = document.createElement("div");
-        text.textContent =
+        row.appendChild(label);
+        const valueNode =
+          value && typeof value === "object"
+            ? document.createElement("pre")
+            : document.createElement("div");
+        valueNode.className = "version-value";
+        valueNode.textContent =
           value === null || value === undefined
             ? "—"
             : typeof value === "object"
               ? JSON.stringify(value, null, 2)
               : String(value);
-        row.appendChild(label);
-        row.appendChild(text);
+        row.appendChild(valueNode);
         container.appendChild(row);
       });
       return container;
