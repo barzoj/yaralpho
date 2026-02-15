@@ -222,15 +222,25 @@ test("control plane renders repositories, batches, and guards restart", async ()
   assert.ok(!doneActions.children.some((c) => c.textContent === "Restart"), "no restart button for completed batch");
 
   const tasksCell = failedRow.children[1];
+  await flush();
+  const tasksContainer = findFirstClass(tasksCell, "tasks-cell");
+  assert.ok(tasksContainer, "tasks cell uses layout class");
   const toggle = findFirstTag(tasksCell, "BUTTON");
   assert.ok(toggle, "tasks toggle exists");
+  const tasksHeader = findFirstClass(tasksCell, "tasks-header");
+  assert.ok(tasksHeader, "tasks header groups pill and toggle");
+  const tasksScroll = findFirstClass(tasksCell, "tasks-scroll");
+  assert.ok(tasksScroll, "tasks scroll container present");
+  assert.strictEqual(tasksScroll.hidden, true, "tasks are collapsed by default");
+  assert.match(toggle.textContent, /show tasks/i);
   await toggle.trigger("click");
+  await flush();
   const innerTable = findFirstTag(tasksCell, "TABLE");
   assert.ok(innerTable, "tasks table rendered");
   const tasksSection = findFirstClass(tasksCell, "tasks-section");
   assert.ok(tasksSection, "tasks section container present");
-  const tasksScroll = findFirstClass(tasksCell, "tasks-scroll");
-  assert.ok(tasksScroll, "tasks scroll container present");
+  assert.strictEqual(tasksScroll.hidden, false, "tasks expand on toggle");
+  assert.match(toggle.textContent, /hide tasks/i);
   assert.ok(
     typeof innerTable.className === "string" && innerTable.className.includes("tasks-table"),
     "tasks table carries responsive class"
@@ -291,6 +301,7 @@ test("restart refreshes batch status and clears task cache", async () => {
 
   const tasksCell = row.children[1];
   const toggle = findFirstTag(tasksCell, "BUTTON");
+  assert.ok(toggle);
   await toggle.trigger("click");
   await flush();
   let innerTable = findFirstTag(tasksCell, "TABLE");
@@ -336,6 +347,7 @@ test("restart refreshes batch status and clears task cache", async () => {
   assert.match(statusCellText.toLowerCase(), /pending/, "status updated after restart");
   const updatedTasksCell = updatedRow.children[1];
   const updatedToggle = findFirstTag(updatedTasksCell, "BUTTON");
+  assert.ok(updatedToggle);
   await updatedToggle.trigger("click");
   await flush();
   await flush();

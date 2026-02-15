@@ -103,13 +103,44 @@
     .control-table {
       min-width: 520px;
     }
+    .control-table th,
+    .control-table td {
+      word-break: break-word;
+    }
     .tasks-scroll {
       width: 100%;
       overflow-x: auto;
       padding-bottom: 6px;
     }
+    .tasks-section {
+      display: grid;
+      gap: 8px;
+      align-items: start;
+    }
+    .tasks-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .tasks-cell {
+      display: grid;
+      gap: 8px;
+      word-break: break-word;
+    }
+    .tasks-empty {
+      display: grid;
+      gap: 6px;
+      align-items: start;
+    }
+    .tasks-toggle {
+      padding: 6px 10px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
     .tasks-table {
       min-width: 420px;
+      word-break: break-word;
     }
     .app-shell {
       display: grid;
@@ -523,6 +554,22 @@
       .actions .button-link {
         min-width: 120px;
         flex: 1 1 auto;
+      }
+      .control-table th,
+      .control-table td,
+      .tasks-table th,
+      .tasks-table td {
+        padding: 8px 6px;
+        word-break: break-word;
+      }
+      .tasks-section {
+        gap: 6px;
+      }
+      .tasks-header {
+        gap: 6px;
+      }
+      .tasks-toggle {
+        width: auto;
       }
     }
     @media (max-width: 900px) {

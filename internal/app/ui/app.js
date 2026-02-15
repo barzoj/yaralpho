@@ -1210,28 +1210,39 @@
   function buildTasksContent(items) {
     const container = document.createElement("div");
     container.className = "tasks-section";
+    container.style.wordBreak = "break-word";
 
     const countPill = document.createElement("div");
     countPill.className = "pill";
     countPill.textContent = `${items.length} task${items.length === 1 ? "" : "s"}`;
-    container.appendChild(countPill);
 
     if (!items.length) {
-      container.appendChild(emptyState("No tasks found for this batch."));
+      const empty = document.createElement("div");
+      empty.className = "tasks-empty";
+      empty.appendChild(countPill);
+      empty.appendChild(emptyState("No tasks found for this batch."));
+      container.appendChild(empty);
       return container;
     }
 
+    const header = document.createElement("div");
+    header.className = "tasks-header";
+    header.appendChild(countPill);
+
     const toggle = document.createElement("button");
     toggle.type = "button";
-    toggle.className = "details-toggle";
+    toggle.className = "details-toggle tasks-toggle";
     toggle.textContent = "Show tasks";
     toggle.setAttribute("aria-expanded", "false");
+    header.appendChild(toggle);
 
     const scroll = document.createElement("div");
     scroll.className = "tasks-scroll";
     scroll.style.maxHeight = "240px";
     scroll.style.overflowY = "auto";
     scroll.style.overflowX = "auto";
+    scroll.style.wordBreak = "break-word";
+    scroll.style.whiteSpace = "normal";
     scroll.hidden = true;
 
     const rows = items.map((item, idx) => [
@@ -1251,7 +1262,7 @@
       toggle.setAttribute("aria-expanded", String(willShow));
     });
 
-    container.appendChild(toggle);
+    container.appendChild(header);
     container.appendChild(scroll);
     return container;
   }
@@ -1357,6 +1368,8 @@
 
         const rows = batches.map((batch) => {
           const tasksCell = document.createElement("div");
+          tasksCell.className = "tasks-cell";
+          tasksCell.style.wordBreak = "break-word";
           tasksCell.textContent = "Loading tasks…";
           fetchBatchItems(batch, { forceRefresh: true })
             .then((items) => {
