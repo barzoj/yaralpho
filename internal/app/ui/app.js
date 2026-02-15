@@ -312,25 +312,10 @@
 
   function navigateToRoute(route) {
     const targetHref = buildNavHref(route);
-    if (window?.history?.replaceState) {
-      window.history.replaceState(null, "", targetHref);
+    if (window?.history?.pushState) {
+      window.history.pushState(null, "", targetHref);
     } else if (window?.location) {
       window.location.href = targetHref;
-    }
-    if (window?.location) {
-      try {
-        const parsed = new URL(targetHref, window.location.href || DEFAULT_BASE_URL);
-        window.location.hash = parsed.hash || "";
-        window.location.search = parsed.search || "";
-        if (parsed.pathname) {
-          window.location.pathname = parsed.pathname;
-        }
-        if (!window?.history?.replaceState) {
-          window.location.href = parsed.href;
-        }
-      } catch (_) {
-        // noop for environments without URL support
-      }
     }
     dispatchHashChange();
     if (!window?.__NAV_SKIP_ROUTE__ && typeof routeApp === "function") {
@@ -2819,8 +2804,8 @@
       renderNav("version");
       return renderVersionView();
     }
-    renderNav("batches");
-    return renderBatches();
+    renderNav("control-plane");
+    return renderControlPlaneView();
   }
 
   function handleHashChange() {

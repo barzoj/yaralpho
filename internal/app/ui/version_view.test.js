@@ -30,6 +30,17 @@ class FakeElement {
   getAttribute(name) {
     return this.attributes.get(name);
   }
+
+  addEventListener(event, handler) {
+    if (!this.listeners) this.listeners = {};
+    if (!this.listeners[event]) this.listeners[event] = [];
+    this.listeners[event].push(handler);
+  }
+
+  removeEventListener(event, handler) {
+    if (!this.listeners || !this.listeners[event]) return;
+    this.listeners[event] = this.listeners[event].filter((fn) => fn !== handler);
+  }
 }
 
 class FakeDocument {

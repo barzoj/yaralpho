@@ -3,55 +3,65 @@ const test = require("node:test");
 
 class FakeElement {
   constructor(tagName) {
-    this.tagName = (tagName || "div").toUpperCase();
+    this.tagName = tagName.toUpperCase();
     this.children = [];
-    this.parentNode = null;
-    this.className = "";
     this.textContent = "";
     this.href = "";
+    this.className = "";
     this.attributes = new Map();
-    this._listeners = {};
+    this.innerHTML = "";
+    this.value = "";
+    this.disabled = false;
+    this.listeners = {};
+    this.style = {};
   }
 
   appendChild(child) {
-    if (!child) return child;
-    child.parentNode = this;
-    this.children.push(child);
+    if (child) {
+      this.children.push(child);
+      if (!this.value && this.tagName === "SELECT" && child.value) {
+        this.value = child.value;
+      }
+    }
     return child;
   }
 
+  replaceChildren(...nodes) {
+    this.children = [];
+    nodes.forEach((n) => this.appendChild(n));
+  }
+
+  replaceWith(node) {
+    this.replacedWith = node;
+  }
+
   setAttribute(name, value) {
-    this.attributes.set(name, String(value));
+    this.attributes.set(name, value);
   }
 
   getAttribute(name) {
     return this.attributes.get(name);
   }
 
-  addEventListener(type, fn) {
-    if (!this._listeners[type]) this._listeners[type] = [];
-    this._listeners[type].push(fn);
+  addEventListener(event, handler) {
+    if (!this.listeners[event]) this.listeners[event] = [];
+    this.listeners[event].push(handler);
   }
 
-  querySelectorAll(selector) {
-    const selectors = selector.split(",").map((s) => s.trim().toUpperCase());
-    const results = [];
-    const visit = (node) => {
-      if (selectors.includes(node.tagName)) {
-        results.push(node);
-      }
-      node.children.forEach(visit);
-    };
-    this.children.forEach(visit);
-    return results;
+  async trigger(event) {
+    const handlers = this.listeners[event] || [];
+    for (const handler of handlers) {
+      await handler({
+        preventDefault() {},
+        stopPropagation() {},
+      });
+    }
   }
 }
 
 class FakeDocument {
   constructor() {
     this._byId = new Map();
-    this._listeners = {};
-    this.body = new FakeElement("body");
   }
 
   createElement(tag) {
@@ -59,123 +69,183 @@ class FakeDocument {
   }
 
   getElementById(id) {
-    return this._byId.get(id) || null;
+    if (!this._byId.has(id)) {
+      this._byId.set(id, new FakeElement("div"));
+    }
+    return this._byId.get(id);
   }
 
-  addEventListener(type, fn) {
-    if (!this._listeners[type]) this._listeners[type] = [];
-    this._listeners[type].push(fn);
-  }
-
-  dispatch(type, evt) {
-    (this._listeners[type] || []).forEach((fn) => fn(evt));
+  addEventListener() {
+    // no-op for tests
   }
 }
 
-function setupDom({ search, hash, pathname } = {}) {
+function setupDom({ hash = "", search = "", pathname = "/app" } = {}) {
   const listeners = {};
   global.Node = FakeElement;
   global.document = new FakeDocument();
-
-  const ids = [
-    "status",
-    "content",
-    "view-title",
-    "breadcrumbs",
-    "nav-toggle",
-    "nav-dropdown",
-    "nav",
-    "footer-content",
-  ];
-  ids.forEach((id) => {
-    const tag = id === "nav" ? "nav" : "div";
-    const el = new FakeElement(tag);
-    el.id = id;
-    document._byId.set(id, el);
-    document.body.appendChild(el);
+  ["status", "content", "view-title", "breadcrumbs", "nav", "nav-toggle", "nav-dropdown"].forEach((id) => {
+    document._byId.set(id, new FakeElement("div"));
   });
-  document.getElementById("nav-dropdown").appendChild(document.getElementById("nav"));
 
-  const defaultHref = `http://localhost${pathname || "/"}${search || ""}${hash || ""}`;
-  global.window = {
-    __NAV_SKIP_ROUTE__: true,
-    location: {
-      hash: hash || "",
-      search: search || "",
-      pathname: pathname || "/",
-      origin: "http://localhost",
-      protocol: "http:",
-      host: "localhost",
-      href: defaultHref,
-    },
-    history: {
-      replaceState: (_state, _title, url) => {
-        const parsed = new URL(url, "http://localhost");
-        window.location.href = parsed.href;
-        window.location.hash = parsed.hash;
-        window.location.search = parsed.search;
-        window.location.pathname = parsed.pathname;
-      },
-    },
-    addEventListener: (type, fn) => {
-      listeners[type] = listeners[type] || [];
-      listeners[type].push(fn);
-    },
-    removeEventListener: (type, fn) => {
-      listeners[type] = (listeners[type] || []).filter((cb) => cb !== fn);
-    },
-    dispatch: (type, evt) => {
-      (listeners[type] || []).forEach((fn) => fn(evt));
-    },
-    dispatchEvent: (evt) => {
-      if (!evt || !evt.type) return;
-      (listeners[evt.type] || []).forEach((fn) => fn(evt));
-    },
+  const locationObj = {
+    hash,
+    search,
+    pathname,
+    protocol: "http:",
+    host: "localhost",
+    origin: "http://localhost",
+    href: `http://localhost${pathname}${search}${hash}`,
   };
 
-  return { listeners };
+  global.Event = class {
+    constructor(type) {
+      this.type = type;
+    }
+  };
+
+  global.window = {
+    location: locationObj,
+    listeners,
+    history: {
+      pushState: (_, __, url) => {
+        const parsed = new URL(url, "http://localhost");
+        locationObj.hash = parsed.hash || "";
+        locationObj.search = parsed.search || "";
+        locationObj.pathname = parsed.pathname || "";
+        locationObj.href = parsed.href;
+        const handlerList = listeners.popstate || [];
+        handlerList.forEach((fn) => fn({ state: null }));
+      },
+    },
+    addEventListener: (event, handler) => {
+      if (!listeners[event]) listeners[event] = [];
+      listeners[event].push(handler);
+    },
+    removeEventListener: (event, handler) => {
+      if (!listeners[event]) return;
+      listeners[event] = listeners[event].filter((fn) => fn !== handler);
+    },
+    dispatchEvent: (evt) => {
+      const handlerList = listeners[evt.type] || [];
+      handlerList.forEach((fn) => fn(evt));
+    },
+  };
 }
 
 function loadModule() {
   delete require.cache[require.resolve("./app.js")];
-  return require("./app.js");
+  return require("./app.js").NavRouting;
 }
 
-test("nav links clear batch/run query params and update hash routing", () => {
-  setupDom({
-    search: "?batch=batch-1&run=run-9",
-    hash: "#/runs",
-    pathname: "/app",
+function setFetchStub(respond) {
+  global.fetch = (url, options = {}) => respond(url, options);
+}
+
+function textContent(node) {
+  if (!node) return "";
+  let text = typeof node.textContent === "string" ? node.textContent : "";
+  for (const child of node.children || []) {
+    text += ` ${textContent(child)}`;
+  }
+  return text.trim();
+}
+
+test("getRouteFromHash normalizes routes", () => {
+  setupDom({ hash: "" });
+  const { getRouteFromHash } = loadModule();
+  assert.strictEqual(getRouteFromHash(""), "");
+  assert.strictEqual(getRouteFromHash("#/agents"), "agents");
+  assert.strictEqual(getRouteFromHash("#/agents?foo=bar"), "agents");
+  assert.strictEqual(getRouteFromHash("#/repositories"), "repositories");
+  assert.strictEqual(getRouteFromHash("#/control-plane"), "control-plane");
+});
+
+test("default route renders control plane when no hash/query", async () => {
+  setupDom({ hash: "", search: "" });
+  setFetchStub((url, options = {}) => {
+    if (url === "/repository" && (!options.method || options.method === "GET")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve([]),
+        text: () => Promise.resolve("[]"),
+      });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
   });
+  const { routeApp } = loadModule();
 
-  const { NavRouting, VersionView } = loadModule();
-  VersionView.renderNav("batches");
+  await routeApp();
 
-  const nav = document.getElementById("nav");
-  const links = nav.children;
-  assert.ok(links.length >= 3, "nav links rendered");
+  assert.strictEqual(document.getElementById("view-title").textContent, "Control Plane");
+  const navText = textContent(document.getElementById("nav"));
+  assert.match(navText, /Control Plane/);
+});
 
-  Array.from(links).forEach((link) => {
-    assert.ok(!link.href.includes("?batch"), "href strips batch query");
-    assert.ok(!link.href.includes("?run"), "href strips run query");
+test("hash routes dispatch correct view", async () => {
+  setupDom({ hash: "#/agents", search: "" });
+  setFetchStub((url, options = {}) => {
+    if (url === "/agent" && (!options.method || options.method === "GET")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve([]),
+        text: () => Promise.resolve("[]"),
+      });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
   });
+  const { routeApp } = loadModule();
 
-  let hashChanges = 0;
-  window.addEventListener("hashchange", () => {
-    hashChanges += 1;
+  await routeApp();
+
+  assert.strictEqual(document.getElementById("view-title").textContent, "Agents");
+  const navText = textContent(document.getElementById("nav"));
+  assert.match(navText, /Agents/);
+});
+
+test("batch query param takes precedence over hash route", async () => {
+  setupDom({ hash: "#/agents", search: "?batch=b1" });
+  setFetchStub((url, options = {}) => {
+    const method = (options && options.method) || "GET";
+    if (url === "/batches/b1" && method === "GET") {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ batch: { batch_id: "b1", repository_id: "repo1", session_name: "Batch One" } }),
+        text: () => Promise.resolve("{}"),
+      });
+    }
+    if (url.startsWith("/repository/repo1/batch/b1/runs") && method === "GET") {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ runs: [], count: 0 }),
+        text: () => Promise.resolve("{}"),
+      });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
   });
+  const { routeApp } = loadModule();
 
-  const controlLink =
-    Array.from(links).find((link) => (link.textContent || "").includes("Control")) || links[1];
-  const clickHandlers = controlLink._listeners?.click || [];
-  assert.ok(clickHandlers.length > 0, "nav link has click handler");
-  clickHandlers.forEach((fn) => fn({ preventDefault() {} }));
+  await routeApp();
 
-  assert.strictEqual(window.location.search, "", "search cleared after nav");
-  assert.ok(window.location.hash.includes("control-plane"), "hash set to target route");
-  assert.ok(hashChanges > 0, "hashchange dispatched");
+  assert.match(document.getElementById("view-title").textContent, /Runs for/);
+});
 
-  const params = NavRouting.getQueryParams();
-  assert.strictEqual(params.batch, null);
-  assert.strictEqual(params.run, null);
+test("navigateToRoute clears query params and updates hash", async () => {
+  setupDom({ hash: "#/agents", search: "?batch=b1", pathname: "/app" });
+  window.__NAV_SKIP_ROUTE__ = true;
+  const { navigateToRoute, buildNavHref } = loadModule();
+
+  navigateToRoute("repositories");
+
+  assert.strictEqual(window.location.search, "");
+  assert.strictEqual(window.location.hash, "#/repositories");
+  assert.strictEqual(buildNavHref("version"), "http://localhost/app#/version");
 });
