@@ -3,6 +3,7 @@
   const contentEl = document.getElementById("content");
   const viewTitle = document.getElementById("view-title");
   const breadcrumbsEl = document.getElementById("breadcrumbs");
+  const navEl = document.getElementById("nav");
   const runLayoutHelpers = typeof RunLayout !== "undefined" ? RunLayout : {};
 
   const params = new URLSearchParams(window.location.search);
@@ -250,6 +251,26 @@
     return a;
   }
 
+  const NAV_ITEMS = [
+    { label: "Batches", href: "#/", route: "batches" },
+    { label: "Version", href: "#/version", route: "version" },
+  ];
+
+  function renderNav(activeRoute) {
+    if (!navEl) return;
+    navEl.innerHTML = "";
+    NAV_ITEMS.forEach((item) => {
+      const link = document.createElement("a");
+      link.href = item.href;
+      link.textContent = item.label;
+      link.className = "button-link";
+      if (item.route === activeRoute) {
+        link.setAttribute("aria-current", "page");
+      }
+      navEl.appendChild(link);
+    });
+  }
+
   function formatDate(raw) {
     if (!raw) return "—";
     const date = new Date(raw);
@@ -308,6 +329,30 @@
     return batch;
   }
 
+  async function fetchVersionData() {
+    const res = await fetch("/version");
+    const contentType = (res.headers && res.headers.get && res.headers.get("content-type")) || "";
+    const rawText = await res.text();
+    let parsed = null;
+    if (contentType.includes("application/json")) {
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (_) {
+        parsed = null;
+      }
+    }
+    if (!res.ok) {
+      const message =
+        (parsed && (parsed.error || parsed.message)) ||
+        rawText ||
+        `Request failed (${res.status})`;
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
+    }
+    return parsed !== null ? parsed : rawText;
+  }
+
   function buildTable(headers, rows) {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
@@ -336,6 +381,74 @@
     });
     table.appendChild(tbody);
     return table;
+  }
+
+  function renderVersionBody(data) {
+    const container = document.createElement("div");
+    container.className = "meta-grid";
+
+    if (data && typeof data === "object") {
+      const entries = Object.entries(data);
+      if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.textContent = "No version information returned.";
+        container.appendChild(empty);
+        return container;
+      }
+      entries.forEach(([key, value]) => {
+        const row = document.createElement("div");
+        row.className = "version-row";
+        const label = document.createElement("div");
+        label.className = "pill";
+        label.textContent = key;
+        const text = document.createElement("div");
+        text.textContent =
+          value === null || value === undefined
+            ? "—"
+            : typeof value === "object"
+              ? JSON.stringify(value, null, 2)
+              : String(value);
+        row.appendChild(label);
+        row.appendChild(text);
+        container.appendChild(row);
+      });
+      return container;
+    }
+
+    const text = document.createElement("div");
+    text.textContent =
+      data === null || data === undefined || data === ""
+        ? "No version information returned."
+        : String(data);
+    container.appendChild(text);
+    return container;
+  }
+
+  async function renderVersionView() {
+    resetLiveStream("switching view");
+    viewTitle.textContent = "Version";
+    renderBreadcrumbs([{ label: "Version" }]);
+    clearContent();
+    setStatus("Loading version…", "loading");
+    try {
+      const data = await fetchVersionData();
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const title = document.createElement("div");
+      title.className = "view-header";
+      const heading = document.createElement("h3");
+      heading.textContent = "Version detail";
+      title.appendChild(heading);
+      card.appendChild(title);
+
+      card.appendChild(renderVersionBody(data));
+      contentEl.appendChild(card);
+      setStatus("Version loaded", "success");
+    } catch (err) {
+      contentEl.appendChild(emptyState("Unable to load version info."));
+      setStatus(err?.message || "Failed to load version", "error");
+    }
   }
 
   function getEventType(evt) {
@@ -1591,19 +1704,47 @@
       renderEventsList,
       formatCodexItemSummary,
     };
+    module.exports.VersionView = {
+      renderVersionView,
+      fetchVersionData,
+      getRouteFromHash,
+      renderNav,
+      routeApp,
+    };
   }
 
-  function start() {
+  function getRouteFromHash(rawHash) {
+    const hash = rawHash === undefined ? window.location.hash || "" : rawHash || "";
+    const normalized = hash.replace(/^#/, "").replace(/^\/+/, "").trim();
+    if (!normalized) return "";
+    const [path] = normalized.split(/[?#]/);
+    if (path === "version") return "version";
+    return "";
+  }
+
+  function routeApp() {
+    const route = getRouteFromHash();
     if (runParam) {
-      renderRunView(runParam, batchParam);
-      return;
+      renderNav("batches");
+      return renderRunView(runParam, batchParam);
     }
     if (batchParam) {
-      renderRuns(batchParam);
-      return;
+      renderNav("batches");
+      return renderRuns(batchParam);
     }
-    renderBatches();
+    if (route === "version") {
+      renderNav("version");
+      return renderVersionView();
+    }
+    renderNav("batches");
+    return renderBatches();
   }
 
-  document.addEventListener("DOMContentLoaded", start);
+  function handleHashChange() {
+    if (runParam || batchParam) return;
+    routeApp();
+  }
+
+  window.addEventListener("hashchange", handleHashChange);
+  document.addEventListener("DOMContentLoaded", routeApp);
 })();
