@@ -209,3 +209,26 @@ test("nav menu resets on desktop width", () => {
   assert.strictEqual(dropdown.getAttribute("aria-hidden"), "false");
   assert.ok(!NavMenu.isNavMenuOpen(), "state not considered open on desktop");
 });
+
+test("nav link click navigates and closes menu on mobile", () => {
+  setupDom(500);
+  const { VersionView, NavMenu } = loadModule();
+
+  VersionView.renderNav("control-plane");
+  NavMenu.openNavMenu();
+
+  const dropdown = document.getElementById("nav-dropdown");
+  const toggle = document.getElementById("nav-toggle");
+  const links = NavMenu.getNavLinks();
+  assert.ok(links.length > 0, "nav links rendered");
+
+  // Simulate clicking the first nav link (handlers attached by renderNav + bindings)
+  const first = links[0];
+  (first._listeners.click || []).forEach((fn) => fn({ preventDefault() {} }));
+
+  assert.ok(!NavMenu.isNavMenuOpen(), "menu closed after link click");
+  assert.strictEqual(dropdown.getAttribute("data-open"), "false");
+  assert.strictEqual(dropdown.getAttribute("aria-hidden"), "true");
+  assert.strictEqual(toggle.getAttribute("aria-expanded"), "false");
+  assert.match(String(window.location.href || ""), /#\//, "navigation updated hash route");
+});
