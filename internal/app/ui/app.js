@@ -535,12 +535,14 @@
       link.href = buildNavHref(item.route === "batches" ? "" : item.route);
       link.textContent = item.label;
       link.className = "button-link nav-link";
-      link.addEventListener("click", (evt) => {
-        if (typeof evt?.preventDefault === "function") {
-          evt.preventDefault();
-        }
-        navigateToRoute(item.route === "batches" ? "" : item.route);
-      });
+      if (typeof link.addEventListener === "function") {
+        link.addEventListener("click", (evt) => {
+          if (typeof evt?.preventDefault === "function") {
+            evt.preventDefault();
+          }
+          navigateToRoute(item.route === "batches" ? "" : item.route);
+        });
+      }
       if (item.route === activeRoute) {
         link.setAttribute("aria-current", "page");
       }
