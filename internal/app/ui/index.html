@@ -80,6 +80,21 @@
       position: sticky;
       top: 12px;
     }
+    .nav-stack,
+    .nav-list {
+      display: grid;
+      gap: 8px;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .nav-link {
+      display: inline-flex;
+      width: 100%;
+      justify-content: flex-start;
+      text-align: left;
+    }
     .sidebar-header {
       font-weight: 700;
       font-size: 14px;
@@ -346,7 +361,7 @@
     <div class="app-shell">
       <aside class="sidebar card">
         <div class="sidebar-header">Navigation</div>
-        <nav id="nav"></nav>
+        <nav id="nav" class="nav-stack nav-list" aria-label="Primary"></nav>
       </aside>
       <section class="main-area">
         <div id="status" class="status info">Loading view…</div>

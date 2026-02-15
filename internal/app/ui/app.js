@@ -272,11 +272,12 @@
   function renderNav(activeRoute) {
     if (!navEl) return;
     navEl.innerHTML = "";
+    navEl.className = "nav-stack nav-list";
     NAV_ITEMS.forEach((item) => {
       const link = document.createElement("a");
       link.href = item.href;
       link.textContent = item.label;
-      link.className = "button-link";
+      link.className = "button-link nav-link";
       if (item.route === activeRoute) {
         link.setAttribute("aria-current", "page");
       }
