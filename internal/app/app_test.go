@@ -441,6 +441,53 @@ func TestRestartNoWaitKeepsRunning(t *testing.T) {
 	require.True(t, sched.draining.Load())
 	require.False(t, sched.waitCalled.Load())
 	require.Equal(t, int64(0), sched.stopCount.Load())
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	require.Contains(t, rec.Body.String(), `"status":"draining"`)
+	require.Contains(t, rec.Body.String(), `"active_runs":2`)
+
+	select {
+	case err := <-runDone:
+		t.Fatalf("app exited unexpectedly: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	runCancel()
+	select {
+	case err := <-runDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatalf("app did not exit after cancellation")
+	}
+}
+
+func TestRestartWaitTimeoutKeepsRunning(t *testing.T) {
+	st := newHandlerTestStorage()
+	app := newTestApp(t, st)
+	if cfg, ok := app.cfg.(fakeConfig); ok {
+		cfg[config.RestartWaitTimeoutKey] = "20ms"
+	}
+
+	sched := &drainingScheduler{waitCh: make(chan struct{})}
+	sched.active.Store(3)
+	app.SetScheduler(sched)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- app.Run(runCtx)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/restart?wait=true", nil)
+	rec := httptest.NewRecorder()
+	app.Router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestTimeout, rec.Code)
+	require.True(t, sched.draining.Load())
+	require.True(t, sched.waitCalled.Load())
+	require.Equal(t, int64(0), sched.stopCount.Load())
+	require.Contains(t, rec.Body.String(), "timed out")
 
 	select {
 	case err := <-runDone:
