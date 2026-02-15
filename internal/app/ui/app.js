@@ -575,6 +575,7 @@
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.textContent = "Edit";
+      editBtn.className = "button-control button-secondary";
       editBtn.disabled = isBusy;
       if (isBusy) editBtn.title = "Agent is busy";
       if (typeof onEdit === "function" && !isBusy) {
@@ -585,6 +586,7 @@
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.textContent = "Delete";
+      deleteBtn.className = "button-control button-secondary";
       deleteBtn.disabled = isBusy;
       if (isBusy) deleteBtn.title = "Agent is busy";
       if (typeof onDelete === "function" && !isBusy) {
@@ -660,14 +662,16 @@
     container.className = "agents-view";
 
     const createForm = document.createElement("form");
-    createForm.className = "card";
+    createForm.className = "card form-grid";
     const createHeader = document.createElement("h3");
     createHeader.textContent = "Create agent";
     createForm.appendChild(createHeader);
     const createName = document.createElement("input");
     createName.type = "text";
     createName.placeholder = "Name";
+    createName.className = "input-control";
     const createRuntime = document.createElement("select");
+    createRuntime.className = "select-control";
     AGENT_RUNTIMES.forEach((rt) => {
       const opt = document.createElement("option");
       opt.value = rt;
@@ -679,10 +683,11 @@
     const createSubmit = document.createElement("button");
     createSubmit.type = "submit";
     createSubmit.textContent = "Create";
+    createSubmit.className = "button-control button-primary";
     createForm.appendChild(createSubmit);
 
     const editForm = document.createElement("form");
-    editForm.className = "card";
+    editForm.className = "card form-grid";
     const editHeader = document.createElement("h3");
     editHeader.textContent = "Edit agent";
     editForm.appendChild(editHeader);
@@ -693,7 +698,9 @@
     const editName = document.createElement("input");
     editName.type = "text";
     editName.placeholder = "Name";
+    editName.className = "input-control";
     const editRuntime = document.createElement("select");
+    editRuntime.className = "select-control";
     AGENT_RUNTIMES.forEach((rt) => {
       const opt = document.createElement("option");
       opt.value = rt;
@@ -705,10 +712,12 @@
     const editSubmit = document.createElement("button");
     editSubmit.type = "submit";
     editSubmit.textContent = "Update";
+    editSubmit.className = "button-control button-primary";
     editSubmit.disabled = true;
     const editCancel = document.createElement("button");
     editCancel.type = "button";
     editCancel.textContent = "Clear";
+    editCancel.className = "button-control button-secondary";
     editCancel.disabled = true;
     editForm.appendChild(editSubmit);
     editForm.appendChild(editCancel);
@@ -862,29 +871,32 @@
     container.className = "repositories-view";
 
     const createForm = document.createElement("form");
-    createForm.className = "card";
+    createForm.className = "card form-grid";
     const createHeader = document.createElement("h3");
     createHeader.textContent = "Create repository";
     createForm.appendChild(createHeader);
     const createName = document.createElement("input");
     createName.type = "text";
     createName.placeholder = "Name";
+    createName.className = "input-control";
     const createPath = document.createElement("input");
     createPath.type = "text";
     createPath.placeholder = "/absolute/path/to/repo";
+    createPath.className = "input-control";
     const createHint = document.createElement("div");
     createHint.className = "pill";
     createHint.textContent = "Path must be absolute (starts with /)";
     const createSubmit = document.createElement("button");
     createSubmit.type = "submit";
     createSubmit.textContent = "Create";
+    createSubmit.className = "button-control button-primary";
     createForm.appendChild(createName);
     createForm.appendChild(createPath);
     createForm.appendChild(createHint);
     createForm.appendChild(createSubmit);
 
     const editForm = document.createElement("form");
-    editForm.className = "card";
+    editForm.className = "card form-grid";
     const editHeader = document.createElement("h3");
     editHeader.textContent = "Edit repository";
     editForm.appendChild(editHeader);
@@ -895,19 +907,23 @@
     const editName = document.createElement("input");
     editName.type = "text";
     editName.placeholder = "Name";
+    editName.className = "input-control";
     const editPath = document.createElement("input");
     editPath.type = "text";
     editPath.placeholder = "/absolute/path/to/repo";
+    editPath.className = "input-control";
     const editPathHint = document.createElement("div");
     editPathHint.className = "pill";
     editPathHint.textContent = "Path must be absolute (starts with /)";
     const editSubmit = document.createElement("button");
     editSubmit.type = "submit";
     editSubmit.textContent = "Update";
+    editSubmit.className = "button-control button-primary";
     editSubmit.disabled = true;
     const editCancel = document.createElement("button");
     editCancel.type = "button";
     editCancel.textContent = "Clear";
+    editCancel.className = "button-control button-secondary";
     editCancel.disabled = true;
     editForm.appendChild(editName);
     editForm.appendChild(editPath);
@@ -949,12 +965,14 @@
         const editBtn = document.createElement("button");
         editBtn.type = "button";
         editBtn.textContent = "Edit";
+        editBtn.className = "button-control button-secondary";
         editBtn.addEventListener("click", () => setEditing(repo));
         actions.appendChild(editBtn);
 
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.textContent = "Delete";
+        deleteBtn.className = "button-control button-secondary";
         deleteBtn.addEventListener("click", async () => {
           try {
             setStatus(`Deleting ${repo.name || repo.repository_id}…`, "loading");
