@@ -8,6 +8,7 @@
   const navDropdownEl = document.getElementById("nav-dropdown");
   const runLayoutHelpers = typeof RunLayout !== "undefined" ? RunLayout : {};
   const footerContentEl = document.getElementById("footer-content");
+  const defaultContentClassName = contentEl?.className || "";
   const DEFAULT_FOOTER_TEXT = "Footer placeholder — add helpful links soon.";
 
   const LIST_LIMIT = 50;
@@ -194,6 +195,7 @@
   let runLayoutCleanup = null;
 
   function setStatus(text, type = "info", options = {}) {
+    if (!statusEl) return;
     statusEl.className = `status ${type}`;
     statusEl.textContent = text;
     const action = options.action;
@@ -210,11 +212,35 @@
     }
   }
 
-  function clearContent() {
+  function clearContent(options = {}) {
+    if (!contentEl) return;
+    const hasClassOverride =
+      options && Object.prototype.hasOwnProperty.call(options, "className");
+    const nextClass = hasClassOverride
+      ? options.className
+      : defaultContentClassName;
+    if (nextClass !== undefined) {
+      contentEl.className = nextClass;
+    }
     contentEl.innerHTML = "";
   }
 
+  function setViewShell(title, breadcrumbs = [], options = {}) {
+    if (viewTitle) {
+      viewTitle.textContent = title || "";
+    }
+    renderBreadcrumbs(breadcrumbs || []);
+    clearContent({
+      className:
+        Object.prototype.hasOwnProperty.call(options, "contentClassName") &&
+        options.contentClassName !== undefined
+          ? options.contentClassName
+          : defaultContentClassName,
+    });
+  }
+
   function renderBreadcrumbs(items) {
+    if (!breadcrumbsEl) return;
     breadcrumbsEl.innerHTML = "";
     if (!items || !items.length) {
       return;
@@ -1998,10 +2024,9 @@
   }
 
   async function renderBatches() {
-    viewTitle.textContent = "Batches";
-    renderBreadcrumbs([]);
+    renderNav("batches");
+    setViewShell("Batches", [{ label: "Batches" }]);
     setStatus("Loading batches…", "loading");
-    clearContent();
 
     try {
       const data = await fetchJSON(`/batches?limit=${LIST_LIMIT}`);
@@ -2053,8 +2078,16 @@
   }
 
   async function renderRuns(batchId) {
+    renderNav("batches");
+    const fallbackBreadcrumbs = [
+      { label: "Batches", href: "/app" },
+      batchId ? { label: batchId } : null,
+    ].filter(Boolean);
+    setViewShell(
+      batchId ? `Runs for ${batchId}` : "Runs",
+      fallbackBreadcrumbs
+    );
     setStatus("Loading runs…", "loading");
-    clearContent();
 
     let batchDetail;
     try {
@@ -2076,9 +2109,8 @@
     viewTitle.textContent = `Runs for ${batchLabel}`;
     renderBreadcrumbs([
       { label: "Batches", href: "/app" },
-      { label: batchLabel },
+      { label: batchLabel, href: `/app?batch=${encodeURIComponent(batchId)}` },
     ]);
-    clearContent();
 
     const actions = document.createElement("div");
     actions.className = "actions";
@@ -2562,9 +2594,16 @@
 
   async function renderRunView(runId, batchIdFromQuery) {
     resetLiveStream("switching view");
-    viewTitle.textContent = `Run ${runId}`;
+    renderNav("batches");
+    const initialBreadcrumbs = [
+      { label: "Batches", href: "/app" },
+      batchIdFromQuery
+        ? { label: batchIdFromQuery, href: `/app?batch=${encodeURIComponent(batchIdFromQuery)}` }
+        : null,
+      { label: `Run ${runId}` },
+    ].filter(Boolean);
+    setViewShell(`Run ${runId}`, initialBreadcrumbs, { contentClassName: "" });
     setStatus("Loading run…", "loading");
-    clearContent();
 
     let runData;
     try {
@@ -2587,13 +2626,15 @@
     } catch (_) {
       // non-fatal; fallback to raw batch id
     }
-    renderBreadcrumbs([
-      { label: "Batches", href: "/app" },
-      batchId
-        ? { label: batchLabel, href: `/app?batch=${encodeURIComponent(batchId)}` }
-        : null,
-      { label: `Run ${runId}` },
-    ].filter(Boolean));
+    renderBreadcrumbs(
+      [
+        { label: "Batches", href: "/app" },
+        batchId
+          ? { label: batchLabel, href: `/app?batch=${encodeURIComponent(batchId)}` }
+          : null,
+        { label: `Run ${runId}` },
+      ].filter(Boolean)
+    );
 
     const actions = document.createElement("div");
     actions.className = "actions";
