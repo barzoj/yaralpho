@@ -67,6 +67,30 @@
       padding: 16px;
       box-shadow: 0 5px 20px rgba(15, 23, 42, 0.05);
     }
+    .app-shell {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 16px;
+      align-items: start;
+      margin-top: 12px;
+    }
+    .sidebar {
+      display: grid;
+      gap: 10px;
+      position: sticky;
+      top: 12px;
+    }
+    .sidebar-header {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .main-area {
+      display: grid;
+      gap: 12px;
+    }
     .run-layout {
       display: grid;
       gap: 12px;
@@ -287,6 +311,21 @@
       text-decoration: none;
     }
     .button-link:hover { background: #cbd5e1; }
+    .layout-footer {
+      margin: 20px auto 0;
+      max-width: 1100px;
+      padding: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 900px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: relative;
+      }
+    }
   </style>
 </head>
 <body>
@@ -295,13 +334,24 @@
     <p>Navigate with <code>?batch=&lt;id&gt;</code> or <code>?run=&lt;id&gt;</code>. Data comes from existing JSON APIs.</p>
   </header>
   <main>
-    <div id="status" class="status info">Loading view…</div>
-    <div class="view-header">
-      <div id="breadcrumbs" class="breadcrumbs"></div>
-      <h2 id="view-title">Batches</h2>
+    <div class="app-shell">
+      <aside class="sidebar card">
+        <div class="sidebar-header">Navigation</div>
+        <nav id="nav"></nav>
+      </aside>
+      <section class="main-area">
+        <div id="status" class="status info">Loading view…</div>
+        <div class="view-header">
+          <div id="breadcrumbs" class="breadcrumbs"></div>
+          <h2 id="view-title">Batches</h2>
+        </div>
+        <div id="content" class="card"></div>
+      </section>
     </div>
-    <div id="content" class="card"></div>
   </main>
+  <footer class="layout-footer">
+    <div class="layout-footer-inner">Footer</div>
+  </footer>
   <script src="/app/static/live_merge.js"></script>
   <script src="/app/static/live_reconnect.js"></script>
   <script src="/app/static/app.js"></script>
