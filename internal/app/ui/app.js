@@ -4,6 +4,8 @@
   const viewTitle = document.getElementById("view-title");
   const breadcrumbsEl = document.getElementById("breadcrumbs");
   const navEl = document.getElementById("nav");
+  const navToggleEl = document.getElementById("nav-toggle");
+  const navDropdownEl = document.getElementById("nav-dropdown");
   const runLayoutHelpers = typeof RunLayout !== "undefined" ? RunLayout : {};
   const footerContentEl = document.getElementById("footer-content");
   const DEFAULT_FOOTER_TEXT = "Footer placeholder — add helpful links soon.";
@@ -15,6 +17,7 @@
   const LIST_LIMIT = 50;
   const EVENTS_LIMIT = 10000;
   const SCROLL_FOLLOW_THRESHOLD_PX = 24;
+  const NAV_MOBILE_BREAKPOINT = 768;
 
   const EVENT_META = {
     abort: { emoji: "⛔", label: "Session aborted" },
@@ -268,6 +271,186 @@
     { label: "Version", href: "#/version", route: "version" },
   ];
   const AGENT_RUNTIMES = ["codex", "copilot"];
+  let navMenuOpen = false;
+  let navMenuHandlers = { outsideClick: null, keydown: null, resize: null };
+  let manualActiveElement = null;
+
+  function elementContains(parent, node) {
+    if (!parent || !node) return false;
+    if (typeof parent.contains === "function") {
+      try {
+        return parent.contains(node);
+      } catch (_) {
+        // ignore for fake DOM
+      }
+    }
+    let current = node;
+    while (current) {
+      if (current === parent) return true;
+      current = current.parentNode || current.parentElement || null;
+    }
+    return false;
+  }
+
+  function getActiveElement() {
+    if (document && document.activeElement) return document.activeElement;
+    return manualActiveElement;
+  }
+
+  function focusElement(el) {
+    if (!el) return;
+    if (typeof el.focus === "function") {
+      try {
+        el.focus();
+      } catch (_) {
+        // noop for fake DOM
+      }
+    }
+    manualActiveElement = el;
+  }
+
+  function getNavLinks() {
+    const root = navDropdownEl || navEl;
+    if (!root) return [];
+    if (typeof root.querySelectorAll === "function") {
+      return Array.from(root.querySelectorAll("a,button")).filter(Boolean);
+    }
+    const children = Array.isArray(root.children)
+      ? root.children
+      : root.children
+        ? Array.from(root.children)
+        : [];
+    return children.filter(
+      (child) =>
+        child &&
+        typeof child.tagName === "string" &&
+        (child.tagName.toUpperCase() === "A" || child.tagName.toUpperCase() === "BUTTON")
+    );
+  }
+
+  function setNavMenuVisibility(open, forceVisible = false) {
+    const show = forceVisible ? true : !!open;
+    if (navDropdownEl) {
+      navDropdownEl.setAttribute("data-open", show ? "true" : "false");
+      navDropdownEl.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+    if (navToggleEl) {
+      navToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+  }
+
+  function teardownNavMenuListeners() {
+    if (navMenuHandlers.outsideClick && document?.removeEventListener) {
+      document.removeEventListener("click", navMenuHandlers.outsideClick, true);
+    }
+    if (navMenuHandlers.keydown && document?.removeEventListener) {
+      document.removeEventListener("keydown", navMenuHandlers.keydown, true);
+    }
+    navMenuHandlers.outsideClick = null;
+    navMenuHandlers.keydown = null;
+  }
+
+  function handleNavKeydown(evt) {
+    if (!navMenuOpen || !evt) return;
+    if (evt.key === "Escape" || evt.key === "Esc") {
+      closeNavMenu();
+      focusElement(navToggleEl);
+      return;
+    }
+    if (evt.key !== "Tab") return;
+    const focusables = getNavLinks();
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = getActiveElement();
+    if (evt.shiftKey) {
+      if (active === first || !active) {
+        evt.preventDefault?.();
+        focusElement(last);
+      }
+      return;
+    }
+    if (active === last) {
+      evt.preventDefault?.();
+      focusElement(first);
+    }
+  }
+
+  function closeNavMenu() {
+    navMenuOpen = false;
+    setNavMenuVisibility(false);
+    teardownNavMenuListeners();
+  }
+
+  function openNavMenu() {
+    navMenuOpen = true;
+    setNavMenuVisibility(true);
+    if (!navMenuHandlers.outsideClick && document?.addEventListener) {
+      navMenuHandlers.outsideClick = (evt) => {
+        const target = evt?.target;
+        if (elementContains(navDropdownEl, target) || elementContains(navToggleEl, target)) {
+          return;
+        }
+        closeNavMenu();
+      };
+      document.addEventListener("click", navMenuHandlers.outsideClick, true);
+    }
+    if (!navMenuHandlers.keydown && document?.addEventListener) {
+      navMenuHandlers.keydown = (evt) => handleNavKeydown(evt);
+      document.addEventListener("keydown", navMenuHandlers.keydown, true);
+    }
+    const focusables = getNavLinks();
+    if (focusables.length) {
+      focusElement(focusables[0]);
+    } else {
+      focusElement(navToggleEl);
+    }
+  }
+
+  function toggleNavMenu() {
+    if (navMenuOpen) {
+      closeNavMenu();
+    } else {
+      openNavMenu();
+    }
+  }
+
+  function syncNavMenuForViewport() {
+    if (!navDropdownEl) return;
+    const width = Number(window?.innerWidth) || 0;
+    if (width >= NAV_MOBILE_BREAKPOINT) {
+      navMenuOpen = false;
+      teardownNavMenuListeners();
+      setNavMenuVisibility(navMenuOpen, true);
+      return;
+    }
+    setNavMenuVisibility(navMenuOpen, false);
+  }
+
+  function ensureNavMenuBindings() {
+    if (navToggleEl?.addEventListener && !navToggleEl._navMenuBound) {
+      navToggleEl.addEventListener("click", toggleNavMenu);
+      navToggleEl._navMenuBound = true;
+    }
+    if (!navMenuHandlers.resize && window?.addEventListener) {
+      navMenuHandlers.resize = () => {
+        const width = Number(window?.innerWidth) || 0;
+        if (width >= NAV_MOBILE_BREAKPOINT && navMenuOpen) {
+          closeNavMenu();
+        }
+        syncNavMenuForViewport();
+      };
+      window.addEventListener("resize", navMenuHandlers.resize);
+    }
+    const links = getNavLinks();
+    links.forEach((link) => {
+      if (link?.addEventListener && !link._navMenuBound) {
+        link.addEventListener("click", () => closeNavMenu());
+        link._navMenuBound = true;
+      }
+    });
+    syncNavMenuForViewport();
+  }
 
   function renderNav(activeRoute) {
     if (!navEl) return;
@@ -283,6 +466,7 @@
       }
       navEl.appendChild(link);
     });
+    ensureNavMenuBindings();
   }
 
   function formatDate(raw) {
@@ -2474,6 +2658,15 @@
       getRouteFromHash,
       renderNav,
       routeApp,
+    };
+    module.exports.NavMenu = {
+      openNavMenu,
+      closeNavMenu,
+      toggleNavMenu,
+      syncNavMenuForViewport,
+      handleNavKeydown,
+      getNavLinks,
+      isNavMenuOpen: () => navMenuOpen,
     };
     module.exports.Footer = {
       setFooterContent,
