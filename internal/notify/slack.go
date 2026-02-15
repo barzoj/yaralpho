@@ -166,6 +166,9 @@ func (s *Slack) textForEvent(event Event) string {
 		if event.ParentTaskRef != "" {
 			parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
 		}
+		if event.RunID != "" {
+			parts = append(parts, fmt.Sprintf("run=%s", event.RunID))
+		}
 		if event.Status != "" {
 			parts = append(parts, fmt.Sprintf("status=%s", event.Status))
 		}
@@ -193,6 +196,9 @@ func (s *Slack) textForEvent(event Event) string {
 		if event.ParentTaskRef != "" {
 			parts = append(parts, fmt.Sprintf("parent=%s", event.ParentTaskRef))
 		}
+		if event.RunID != "" {
+			parts = append(parts, fmt.Sprintf("run=%s", event.RunID))
+		}
 		if event.Status != "" {
 			parts = append(parts, fmt.Sprintf("status=%s", event.Status))
 		}
@@ -211,6 +217,9 @@ func (s *Slack) textForEvent(event Event) string {
 		}
 		if event.BatchID != "" {
 			parts = append(parts, fmt.Sprintf("batch=%s", event.BatchID))
+		}
+		if event.RunID != "" {
+			parts = append(parts, fmt.Sprintf("run=%s", event.RunID))
 		}
 		if event.TaskRef != "" {
 			parts = append(parts, fmt.Sprintf("task=%s", event.TaskRef))
