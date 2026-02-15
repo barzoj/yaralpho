@@ -334,6 +334,27 @@
       gap: 10px;
       align-content: start;
     }
+    .repositories-view {
+      display: grid;
+      gap: 12px;
+    }
+    .stack-sm {
+      display: grid;
+      gap: 10px;
+    }
+    .scroll-card {
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .scroll-card table {
+      min-width: 720px;
+    }
+    .sticky-header thead th {
+      position: sticky;
+      top: 0;
+      background: var(--card);
+      z-index: 1;
+    }
     .input-control,
     .select-control,
     .textarea-control {
@@ -456,6 +477,13 @@
       }
       .sidebar {
         position: relative;
+      }
+      .stack-sm {
+        grid-template-columns: 1fr;
+      }
+      .scroll-card {
+        margin: 0 -4px;
+        padding: 0 4px 6px;
       }
     }
     @media (max-width: 900px) {

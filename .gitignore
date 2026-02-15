@@ -54,3 +54,4 @@ sync_plan_to_beads.py
 internal/copilot/codex-ts/node_modules/
 internal/copilot/codex-ts/dist/
 internal/copilot/codex-ts/bin/
+.worktrees

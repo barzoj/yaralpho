@@ -871,7 +871,8 @@
     container.className = "repositories-view";
 
     const createForm = document.createElement("form");
-    createForm.className = "card form-grid";
+    createForm.className = "card form-grid stack-sm";
+    createForm.setAttribute("aria-label", "Create repository");
     const createHeader = document.createElement("h3");
     createHeader.textContent = "Create repository";
     createForm.appendChild(createHeader);
@@ -896,7 +897,8 @@
     createForm.appendChild(createSubmit);
 
     const editForm = document.createElement("form");
-    editForm.className = "card form-grid";
+    editForm.className = "card form-grid stack-sm";
+    editForm.setAttribute("aria-label", "Edit repository");
     const editHeader = document.createElement("h3");
     editHeader.textContent = "Edit repository";
     editForm.appendChild(editHeader);
@@ -932,7 +934,9 @@
     editForm.appendChild(editCancel);
 
     const tableContainer = document.createElement("div");
-    tableContainer.className = "card";
+    tableContainer.className = "card scroll-card";
+    tableContainer.setAttribute("role", "region");
+    tableContainer.setAttribute("aria-label", "Repositories table");
 
     container.appendChild(createForm);
     container.appendChild(editForm);
@@ -1005,12 +1009,12 @@
         return;
       }
 
-      tableContainer.appendChild(
-        buildTable(
-          ["Repository ID", "Name", "Path", "Created", "Updated", "Actions"],
-          rows
-        )
+      const table = buildTable(
+        ["Repository ID", "Name", "Path", "Created", "Updated", "Actions"],
+        rows
       );
+      table.className = `${table.className || ""} sticky-header`.trim();
+      tableContainer.appendChild(table);
     }
 
     async function loadRepositories(showStatus = true) {

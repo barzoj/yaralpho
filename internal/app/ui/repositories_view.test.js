@@ -292,3 +292,42 @@ test("edit and delete handle updates and active batch conflict", async () => {
   const textAfterDelete = collectText(document.getElementById("content"));
   assert.match(textAfterDelete, /No repositories found/i);
 });
+
+test("repositories view uses mobile-friendly layout helpers", async () => {
+  setupDom({ hash: "#/repositories" });
+  const repos = [
+    {
+      repository_id: "r1",
+      name: "one",
+      path: "/path/one",
+      created_at: "2026-02-15T00:00:00Z",
+      updated_at: "2026-02-15T00:00:00Z",
+    },
+  ];
+  global.fetch = (url, options = {}) => {
+    const method = (options && options.method) || "GET";
+    if (url === "/repository" && method === "GET") {
+      return mockJsonResponse(repos);
+    }
+    throw new Error(`Unexpected fetch ${method} ${url}`);
+  };
+
+  const { RepositoriesView } = loadModule();
+  await RepositoriesView.routeApp();
+
+  const container = document.getElementById("content").children[0];
+  const createForm = container.children[0];
+  const editForm = container.children[1];
+  const tableWrapper = container.children[2];
+
+  assert.match(createForm.className, /stack-sm/);
+  assert.match(editForm.className, /stack-sm/);
+  assert.strictEqual(createForm.getAttribute("aria-label"), "Create repository");
+  assert.strictEqual(editForm.getAttribute("aria-label"), "Edit repository");
+  assert.match(tableWrapper.className, /scroll-card/);
+  assert.strictEqual(tableWrapper.getAttribute("aria-label"), "Repositories table");
+
+  const table = findFirstTag(tableWrapper, "TABLE");
+  assert.ok(table, "table rendered");
+  assert.match(table.className || "", /sticky-header/);
+});
