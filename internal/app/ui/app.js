@@ -1231,6 +1231,7 @@
     scroll.className = "tasks-scroll";
     scroll.style.maxHeight = "240px";
     scroll.style.overflowY = "auto";
+    scroll.style.overflowX = "auto";
     scroll.hidden = true;
 
     const rows = items.map((item, idx) => [
@@ -1239,9 +1240,9 @@
       item?.status || "unknown",
       Number.isFinite(item?.attempts) ? item.attempts : "—",
     ]);
-    scroll.appendChild(
-      buildTable(["#", "Task", "Status", "Attempts"], rows)
-    );
+    const table = buildTable(["#", "Task", "Status", "Attempts"], rows);
+    table.className = [table.className, "tasks-table"].filter(Boolean).join(" ").trim();
+    scroll.appendChild(table);
 
     toggle.addEventListener("click", () => {
       const willShow = scroll.hidden;

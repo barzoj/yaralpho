@@ -134,6 +134,21 @@ function findFirstTag(node, tagName) {
   return null;
 }
 
+function findFirstClass(node, className) {
+  if (!node) return null;
+  if (
+    typeof node.className === "string" &&
+    node.className.split(" ").includes(className)
+  ) {
+    return node;
+  }
+  for (const child of node.children || []) {
+    const found = findFirstClass(child, className);
+    if (found) return found;
+  }
+  return null;
+}
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("control plane renders repositories, batches, and guards restart", async () => {
@@ -177,6 +192,12 @@ test("control plane renders repositories, batches, and guards restart", async ()
   await flush();
   await flush();
 
+  const content = document.getElementById("content");
+  const controlPlane = content.children.find(
+    (child) => typeof child.className === "string" && child.className.includes("control-plane")
+  );
+  assert.ok(controlPlane, "control plane container rendered");
+
   const nav = document.getElementById("nav");
   const navActive = nav.children.find((child) => child.getAttribute && child.getAttribute("aria-current") === "page");
   assert.ok(navActive, "Control Plane link should be active");
@@ -206,6 +227,14 @@ test("control plane renders repositories, batches, and guards restart", async ()
   await toggle.trigger("click");
   const innerTable = findFirstTag(tasksCell, "TABLE");
   assert.ok(innerTable, "tasks table rendered");
+  const tasksSection = findFirstClass(tasksCell, "tasks-section");
+  assert.ok(tasksSection, "tasks section container present");
+  const tasksScroll = findFirstClass(tasksCell, "tasks-scroll");
+  assert.ok(tasksScroll, "tasks scroll container present");
+  assert.ok(
+    typeof innerTable.className === "string" && innerTable.className.includes("tasks-table"),
+    "tasks table carries responsive class"
+  );
   const tasksBody = innerTable.children.find((el) => el.tagName === "TBODY");
   assert.strictEqual(tasksBody.children.length, 2, "renders all tasks");
   const statuses = collectText(tasksBody);

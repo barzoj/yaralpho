@@ -103,6 +103,14 @@
     .control-table {
       min-width: 520px;
     }
+    .tasks-scroll {
+      width: 100%;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .tasks-table {
+      min-width: 420px;
+    }
     .app-shell {
       display: grid;
       grid-template-columns: 260px 1fr;
@@ -470,6 +478,9 @@
       flex-wrap: wrap;
     }
     @media (max-width: 768px) {
+      .control-plane {
+        grid-template-columns: 1fr;
+      }
       .nav-toggle-row {
         display: flex;
       }
