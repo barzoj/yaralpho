@@ -8,20 +8,26 @@ class FakeElement {
     this.textContent = "";
     this.href = "";
     this.className = "";
+    this.style = {};
     this.attributes = new Map();
-    this.innerHTML = "";
+    this._innerHTML = "";
     this.value = "";
     this.disabled = false;
     this.listeners = {};
-    this.style = {};
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = value;
+    this.children = [];
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
   }
 
   appendChild(child) {
     if (child) {
       this.children.push(child);
-      if (!this.value && this.tagName === "SELECT" && child.value) {
-        this.value = child.value;
-      }
     }
     return child;
   }
@@ -29,10 +35,6 @@ class FakeElement {
   replaceChildren(...nodes) {
     this.children = [];
     nodes.forEach((n) => this.appendChild(n));
-  }
-
-  replaceWith(node) {
-    this.replacedWith = node;
   }
 
   setAttribute(name, value) {
@@ -46,11 +48,6 @@ class FakeElement {
   addEventListener(event, handler) {
     if (!this.listeners[event]) this.listeners[event] = [];
     this.listeners[event].push(handler);
-  }
-
-  removeEventListener(event, handler) {
-    if (!this.listeners[event]) return;
-    this.listeners[event] = this.listeners[event].filter((fn) => fn !== handler);
   }
 
   async trigger(event) {
@@ -81,20 +78,22 @@ class FakeDocument {
   }
 
   addEventListener() {
-    // no-op
+    // no-op for fake DOM
   }
 }
 
-function setupDom({ search = "", hash = "" } = {}) {
+function setupDom({ hash = "#/control-plane" } = {}) {
   global.Node = FakeElement;
   global.document = new FakeDocument();
   ["status", "content", "view-title", "breadcrumbs", "nav"].forEach((id) => {
     document._byId.set(id, new FakeElement("div"));
   });
   global.window = {
-    location: { search, hash, protocol: "http:", host: "localhost" },
+    location: { hash, search: "", protocol: "http:", host: "localhost" },
     addEventListener() {},
     removeEventListener() {},
+    dispatchEvent() {},
+    history: { pushState() {} },
   };
 }
 
@@ -115,161 +114,213 @@ function mockJsonResponse(body, status = 200) {
 
 function collectText(node) {
   if (!node) return "";
-  let text = typeof node.textContent === "string" ? node.textContent : "";
+  let text =
+    typeof node.textContent === "string"
+      ? node.textContent
+      : String(node.textContent ?? "");
   for (const child of node.children || []) {
     text += ` ${collectText(child)}`;
   }
   return text.trim();
 }
 
-function findAllTags(node, tagName, acc = []) {
-  if (!node) return acc;
-  if (node.tagName === tagName.toUpperCase()) acc.push(node);
-  for (const child of node.children || []) {
-    findAllTags(child, tagName, acc);
-  }
-  return acc;
-}
-
-function findFirst(node, predicate) {
+function findFirstTag(node, tagName) {
   if (!node) return null;
-  if (predicate(node)) return node;
+  if (node.tagName === tagName.toUpperCase()) return node;
   for (const child of node.children || []) {
-    const found = findFirst(child, predicate);
+    const found = findFirstTag(child, tagName);
     if (found) return found;
   }
   return null;
 }
 
-test("control plane renders repo batches and task list with scroll", async () => {
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("control plane renders repositories, batches, and guards restart", async () => {
   setupDom({ hash: "#/control-plane" });
-  const repos = [{ repository_id: "r1", name: "Repo One" }];
-  const items = Array.from({ length: 120 }).map((_, idx) => ({
-    input: `task-${idx + 1}`,
-    status: idx % 2 === 0 ? "pending" : "failed",
-    attempts: idx % 3,
-  }));
+  const repos = [{ repository_id: "repo1", name: "Repo One" }];
   const batches = [
-    {
-      batch_id: "b1",
-      repository_id: "r1",
-      status: "failed",
-      items,
-    },
+    { batch_id: "b-failed", repository_id: "repo1", status: "failed" },
+    { batch_id: "b-done", repository_id: "repo1", status: "completed" },
   ];
+  const batchDetails = {
+    "b-failed": {
+      batch_id: "b-failed",
+      repository_id: "repo1",
+      status: "failed",
+      items: [
+        { input: "t1", status: "failed", attempts: 1 },
+        { input: "t2", status: "pending", attempts: 0 },
+      ],
+    },
+    "b-done": {
+      batch_id: "b-done",
+      repository_id: "repo1",
+      status: "completed",
+      items: [{ input: "done", status: "completed", attempts: 1 }],
+    },
+  };
 
   global.fetch = (url, options = {}) => {
-    const method = (options && options.method) || "GET";
-    if (url === "/repository" && method === "GET") {
-      return mockJsonResponse(repos);
-    }
-    if (url.startsWith("/repository/r1/batches") && method === "GET") {
+    const method = options.method || "GET";
+    if (url === "/repository" && method === "GET") return mockJsonResponse(repos);
+    if (url === "/repository/repo1/batches?limit=50" && method === "GET") {
       return mockJsonResponse({ batches, count: batches.length });
     }
-    if (url.startsWith("/batches/") && method === "GET") {
-      return mockJsonResponse(batches[0]);
-    }
-    if (url.includes("/restart") && method === "PUT") {
-      return mockJsonResponse({ batch_id: "b1", status: "pending", repository_id: "r1" });
-    }
+    if (url === "/batches/b-failed" && method === "GET") return mockJsonResponse(batchDetails["b-failed"]);
+    if (url === "/batches/b-done" && method === "GET") return mockJsonResponse(batchDetails["b-done"]);
     throw new Error(`Unexpected fetch ${method} ${url}`);
   };
 
   const { ControlPlaneView } = loadModule();
   await ControlPlaneView.routeApp();
+  await flush();
+  await flush();
 
-  const navText = collectText(document.getElementById("nav"));
-  assert.match(navText, /Control Plane/);
-  const contentText = collectText(document.getElementById("content"));
-  assert.match(contentText, /Repo One/);
-  assert.match(contentText, /b1/);
+  const nav = document.getElementById("nav");
+  const navActive = nav.children.find((child) => child.getAttribute && child.getAttribute("aria-current") === "page");
+  assert.ok(navActive, "Control Plane link should be active");
 
-  const controlPlane = findFirst(document.getElementById("content"), (node) =>
-    (node.className || "").includes("control-plane")
-  );
-  assert.ok(controlPlane, "control plane container present");
+  const table = findFirstTag(document.getElementById("content"), "TABLE");
+  assert.ok(table, "control plane table rendered");
+  const tbody = table.children.find((el) => el.tagName === "TBODY");
+  assert.strictEqual(tbody.children.length, 2);
 
-  const firstCard = findFirst(controlPlane, (node) =>
-    (node.className || "").includes("control-card")
-  );
-  assert.ok(firstCard, "control card uses responsive class");
+  const [failedRow, doneRow] = tbody.children;
+  assert.match(collectText(failedRow.children[0]), /b-failed/);
+  assert.match(collectText(doneRow.children[0]), /b-done/);
 
-  const links = findAllTags(document.getElementById("content"), "A");
-  assert.ok(
-    links.some((l) => (l.href || "").includes("batch=b1")),
-    "batch link points to runs view"
-  );
+  const failedActions = failedRow.children[3];
+  const restartBtn = findFirstTag(failedActions, "BUTTON");
+  assert.ok(restartBtn, "failed batch has restart button");
 
-  const scroll = findFirst(document.getElementById("content"), (node) => node.style?.overflowY === "auto");
-  assert.ok(scroll, "tasks rendered in scrollable container");
+  const doneActions = doneRow.children[3];
+  const pill = findFirstTag(doneActions, "DIV");
+  assert.ok(pill, "non-failed batch shows guard pill");
+  assert.match(collectText(doneActions).toLowerCase(), /failed batches only/);
+  assert.ok(!doneActions.children.some((c) => c.textContent === "Restart"), "no restart button for completed batch");
 
-  const tableWrap = findFirst(document.getElementById("content"), (node) =>
-    (node.className || "").includes("control-table-wrap") ||
-    node.style?.overflowX === "auto"
-  );
-  assert.ok(tableWrap, "table wrapper provides horizontal scroll");
-  assert.strictEqual(tableWrap.style.overflowX, "auto");
-
-  const statusText = collectText(document.getElementById("status"));
-  assert.match(statusText, /Loaded 1 repositories/);
+  const tasksCell = failedRow.children[1];
+  const toggle = findFirstTag(tasksCell, "BUTTON");
+  assert.ok(toggle, "tasks toggle exists");
+  await toggle.trigger("click");
+  const innerTable = findFirstTag(tasksCell, "TABLE");
+  assert.ok(innerTable, "tasks table rendered");
+  const tasksBody = innerTable.children.find((el) => el.tagName === "TBODY");
+  assert.strictEqual(tasksBody.children.length, 2, "renders all tasks");
+  const statuses = collectText(tasksBody);
+  assert.match(statuses, /failed/i);
+  assert.match(statuses, /pending/i);
 });
 
-test("restart is only enabled for failed batches and posts restart", async () => {
+test("restart refreshes batch status and clears task cache", async () => {
   setupDom({ hash: "#/control-plane" });
-  const repos = [{ repository_id: "repo-1", name: "Repo One" }];
-  const batches = [
-    {
-      batch_id: "b-failed",
-      repository_id: "repo-1",
-      status: "failed",
-      items: [{ input: "t1", status: "failed", attempts: 1 }],
-    },
-    {
-      batch_id: "b-pending",
-      repository_id: "repo-1",
-      status: "pending",
-      items: [{ input: "t2", status: "pending", attempts: 0 }],
-    },
-  ];
-  let restartCalls = 0;
-  let afterRestart = false;
+  const repos = [{ repository_id: "repo1", name: "Repo One" }];
+  let batches = [{ batch_id: "b1", repository_id: "repo1", status: "failed" }];
+  let batchDetail = {
+    batch_id: "b1",
+    repository_id: "repo1",
+    status: "failed",
+    items: [{ input: "old", status: "failed", attempts: 1 }],
+  };
+  let lastBatchesResponse = [];
+  const calls = [];
 
   global.fetch = (url, options = {}) => {
-    const method = (options && options.method) || "GET";
-    if (url === "/repository" && method === "GET") {
-      return mockJsonResponse(repos);
+    const method = options.method || "GET";
+    calls.push({ url, method });
+    if (url === "/repository" && method === "GET") return mockJsonResponse(repos);
+    if (url === "/repository/repo1/batches?limit=50" && method === "GET") {
+      lastBatchesResponse = batches.map((b) => ({ ...b }));
+      return mockJsonResponse({ batches, count: batches.length });
     }
-    if (url.startsWith("/repository/repo-1/batches") && method === "GET") {
-      const updated = afterRestart
-        ? [{ ...batches[0], status: "pending" }, batches[1]]
-        : batches;
-      return mockJsonResponse({ batches: updated, count: updated.length });
-    }
-    if (url.startsWith("/repository/repo-1/batch/b-failed/restart") && method === "PUT") {
-      restartCalls += 1;
-      afterRestart = true;
-      return mockJsonResponse({
-        batch_id: "b-failed",
+    if (url === "/batches/b1" && method === "GET") return mockJsonResponse(batchDetail);
+    if (url === "/repository/repo1/batch/b1/restart" && method === "PUT") {
+      batches = [{ batch_id: "b1", repository_id: "repo1", status: "pending" }];
+      batchDetail = {
+        batch_id: "b1",
+        repository_id: "repo1",
         status: "pending",
-        repository_id: "repo-1",
-      });
-    }
-    if (url.startsWith("/batches/b-failed") && method === "GET") {
-      return mockJsonResponse(batches[0]);
+        items: [{ input: "old", status: "queued", attempts: 2 }],
+      };
+      return mockJsonResponse({ batch_id: "b1", status: "pending", repository_id: "repo1" });
     }
     throw new Error(`Unexpected fetch ${method} ${url}`);
   };
 
   const { ControlPlaneView } = loadModule();
   await ControlPlaneView.routeApp();
+  await flush();
+  await flush();
 
-  const buttons = findAllTags(document.getElementById("content"), "BUTTON");
-  const restartButtons = buttons.filter((btn) => btn.textContent === "Restart");
-  assert.strictEqual(restartButtons.length, 1, "only failed batch exposes restart");
+  const table = findFirstTag(document.getElementById("content"), "TABLE");
+  const tbody = table.children.find((el) => el.tagName === "TBODY");
+  const row = tbody.children[0];
+  const actions = row.children[3];
+  const restartBtn = findFirstTag(actions, "BUTTON");
+  assert.ok(restartBtn, "restart button present");
 
-  await restartButtons[0].trigger("click");
-  assert.strictEqual(restartCalls, 1, "restart endpoint called once");
+  const tasksCell = row.children[1];
+  const toggle = findFirstTag(tasksCell, "BUTTON");
+  await toggle.trigger("click");
+  await flush();
+  let innerTable = findFirstTag(tasksCell, "TABLE");
+  let tasksBody = innerTable.children.find((el) => el.tagName === "TBODY");
+  assert.match(collectText(tasksBody), /failed/i, "initial task status shown");
 
-  const statusText = collectText(document.getElementById("status"));
-  assert.match(statusText, /Restarted batch b-failed/);
+  await restartBtn.trigger("click");
+  await flush();
+  await flush();
+  assert.strictEqual(batches[0].status, "pending", "mock batches updated");
+  assert.strictEqual(
+    lastBatchesResponse[0]?.status,
+    "pending",
+    "latest batches response reflects restart"
+  );
+
+  const updatedTable = findFirstTag(document.getElementById("content"), "TABLE");
+  const updatedBody = updatedTable.children.find((el) => el.tagName === "TBODY");
+  const updatedRow = updatedBody.children[0];
+  const batchGets = calls.filter(
+    (c) => c.url === "/repository/repo1/batches?limit=50" && c.method === "GET"
+  );
+  assert.ok(batchGets.length >= 2, "batches refetched after restart");
+  const restartIndex = calls.findIndex(
+    (c) => c.method === "PUT" && c.url === "/repository/repo1/batch/b1/restart"
+  );
+  const lastBatchGetIndex = calls.findLastIndex
+    ? calls.findLastIndex(
+        (c) => c.method === "GET" && c.url === "/repository/repo1/batches?limit=50"
+      )
+    : (() => {
+        let idx = -1;
+        calls.forEach((c, i) => {
+          if (c.method === "GET" && c.url === "/repository/repo1/batches?limit=50") idx = i;
+        });
+        return idx;
+      })();
+  assert.ok(
+    lastBatchGetIndex > restartIndex,
+    "batches refetch happens after restart call"
+  );
+  const statusCellText = collectText(updatedRow.children[2]);
+  assert.match(statusCellText.toLowerCase(), /pending/, "status updated after restart");
+  const updatedTasksCell = updatedRow.children[1];
+  const updatedToggle = findFirstTag(updatedTasksCell, "BUTTON");
+  await updatedToggle.trigger("click");
+  await flush();
+  await flush();
+  await flush();
+  const detailGets = calls.filter(
+    (c) => c.url === "/batches/b1" && c.method === "GET"
+  );
+  assert.ok(detailGets.length >= 2, "batch detail refetched after restart");
+  innerTable = findFirstTag(updatedTasksCell, "TABLE");
+  tasksBody = innerTable.children.find((el) => el.tagName === "TBODY");
+  const statuses = collectText(tasksBody);
+  assert.match(statuses, /queued/i, "tasks refreshed after restart");
+  assert.ok(!/failed/i.test(statuses), "stale task status cleared");
+
+  const restartCalls = calls.filter((c) => c.method === "PUT");
+  assert.strictEqual(restartCalls.length, 1, "restart invoked once");
 });

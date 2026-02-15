@@ -591,12 +591,15 @@
 
   const batchCache = new Map();
 
-  async function fetchBatchDetail(batchId) {
+  async function fetchBatchDetail(batchId, { forceRefresh = false } = {}) {
     if (!batchId) {
       throw new Error("Batch ID is required");
     }
-    if (batchCache.has(batchId)) {
+    if (!forceRefresh && batchCache.has(batchId)) {
       return batchCache.get(batchId);
+    }
+    if (forceRefresh) {
+      batchCache.delete(batchId);
     }
     const data = await fetchJSON(`/batches/${encodeURIComponent(batchId)}`);
     const batch = data?.batch || data;
@@ -1188,10 +1191,10 @@
     return [];
   }
 
-  async function fetchBatchItems(batch) {
-    if (Array.isArray(batch?.items)) return batch.items;
+  async function fetchBatchItems(batch, { forceRefresh = false } = {}) {
+    if (!forceRefresh && Array.isArray(batch?.items)) return batch.items;
     try {
-      const detail = await fetchBatchDetail(batch?.batch_id);
+      const detail = await fetchBatchDetail(batch?.batch_id, { forceRefresh });
       if (Array.isArray(detail?.items)) return detail.items;
     } catch (err) {
       console.warn("Failed to fetch batch detail", err);
@@ -1262,22 +1265,23 @@
     const restartBtn = document.createElement("button");
     restartBtn.type = "button";
     restartBtn.textContent = "Restart";
-    restartBtn.addEventListener("click", async () => {
-      if (restartBtn.disabled) return;
-      restartBtn.disabled = true;
-      try {
-        setStatus(`Restarting ${batch.batch_id}…`, "loading");
-        await fetchJSON(
-          `/repository/${encodeURIComponent(repoId)}/batch/${encodeURIComponent(
-            batch.batch_id
-          )}/restart`,
-          { method: "PUT" }
-        );
-        setStatus(`Restarted batch ${batch.batch_id}`, "success");
-        await reloadRepoBatches();
-      } catch (err) {
-        setStatus(err.message || `Failed to restart ${batch.batch_id}`, "error");
-      } finally {
+      restartBtn.addEventListener("click", async () => {
+        if (restartBtn.disabled) return;
+        restartBtn.disabled = true;
+        try {
+          setStatus(`Restarting ${batch.batch_id}…`, "loading");
+          await fetchJSON(
+            `/repository/${encodeURIComponent(repoId)}/batch/${encodeURIComponent(
+              batch.batch_id
+            )}/restart`,
+            { method: "PUT" }
+          );
+          batchCache.delete(batch.batch_id);
+          setStatus(`Restarted batch ${batch.batch_id}`, "success");
+          await reloadRepoBatches();
+        } catch (err) {
+          setStatus(err.message || `Failed to restart ${batch.batch_id}`, "error");
+        } finally {
         restartBtn.disabled = false;
       }
     });
@@ -1329,6 +1333,7 @@
       container.appendChild(card);
 
       const reloadBatches = async () => {
+        batchCache.clear();
         body.innerHTML = "";
         let batches = [];
         try {
@@ -1347,7 +1352,7 @@
         const rows = batches.map((batch) => {
           const tasksCell = document.createElement("div");
           tasksCell.textContent = "Loading tasks…";
-          fetchBatchItems(batch)
+          fetchBatchItems(batch, { forceRefresh: true })
             .then((items) => {
               tasksCell.innerHTML = "";
               tasksCell.appendChild(buildTasksContent(items));
