@@ -1,93 +1,155 @@
-# Repositories CRUD page Implementation Plan
+# Repositories CRUD Page Implementation Plan
 
 After _human approval_, use plan2beads to convert this plan to a beads epic, then use `superpowers:subagent-driven-development` for parallel execution.
 
-**Goal:** Ship a Repositories page that lists repositories and supports create/edit/delete with absolute path validation, surfacing conflicts and active batch guards.
+**Goal:** Implement the Repositories CRUD page with validation hints and conflict handling so users can list, create, edit, and delete repositories with accurate feedback.
 
-**Architecture:** Vanilla JS view inside `internal/app/ui/app.js` using existing REST endpoints for repositories, with pessimistic reloads after mutations and status banner messaging. Tests run via Node’s built-in test runner with fake DOM elements mirroring existing agent view tests.
+**Architecture:** Vanilla JS single-page view in `internal/app/ui/app.js` using existing fetch helpers and status banner; hash-based routing drives the view while preserving existing batch/run query handling. Tests rely on `node:test` with fake DOM elements and mocked fetch to validate UI behaviors.
 
-**Tech Stack:** Vanilla JS DOM/fetch, Gorilla mux REST endpoints, Node test (`node --test`), Mongo-backed storage through existing handlers.
+**Tech Stack:** Vanilla JS DOM APIs, `node:test`, existing fetchJSON helpers and status rendering in `internal/app/ui/app.js`.
 
 **Key Decisions:**
 
-- **Route name:** `#/repositories` — matches REST noun and keeps parity with existing Agents/Version routes.
-- **Data source:** Use `/repository` REST handlers (GET/POST/PUT/DELETE) — avoids speculative APIs and matches server contracts.
-- **Refresh strategy:** Pessimistic reload after create/update/delete — keeps UI consistent with backend conflict/active batch rules.
-- **Validation UX:** Inline hint that paths must be absolute — aligns with `isValidRepoPath` server validation and prevents 400s.
-- **Error surfacing:** Show server messages for conflicts/active batches — preserves backend semantics (409 conflicts, 404/400 errors).
+- **Validation strategy:** Enforce absolute path and non-empty name client-side before API calls — reduces needless network traffic and surfaces errors early.
+- **Conflict handling:** Treat 409 delete responses (active batches) as user-facing errors shown in status banner — aligns with API semantics and keeps UX transparent.
+- **Data refresh:** Reload repositories list after every mutation (create/edit/delete) — ensures UI consistency without manual state patching.
 
 ---
 
 ## Supporting Documentation
 
-- REST routes defined in `internal/app/routes.go` (`/repository` CRUD, batch listing hooks).
-- Repository handlers: `internal/app/repository_handlers.go` (requires absolute path via `filepath.IsAbs`, conflicts return HTTP 409, delete blocked if `RepositoryHasActiveBatches` is true).
-- Repository model fields: `internal/storage/models.go` (`repository_id`, `name`, `path`, `created_at`, `updated_at`).
-- Mongo storage behavior: `internal/storage/mongo/repositories.go` (duplicate keys => `storage.ErrConflict`, updates set `UpdatedAt`, list sorted newest first).
-- UI patterns to mirror: `internal/app/ui/app.js` Agents view (CRUD flow, table builder) and tests (`internal/app/ui/agents_view.test.js` for fake DOM harness).
+- Existing repositories UI implementation and helpers: `internal/app/ui/app.js` (RepositoriesView, fetch helpers).
+- Existing tests and fake DOM scaffolding: `internal/app/ui/repositories_view.test.js`.
+- Repository API handlers and data model for behavior reference: `internal/storage/mongo/repositories.go`, `internal/app/repository_handlers.go` (path requirements, conflict codes).
+- Batch/restart interactions for downstream dependencies: `internal/app/ui/app.js` control plane and batch helpers (for Task 7 dependency awareness).
 
 ---
 
-### Task 1: Add repositories route and navigation entry
+### Task 1: Wire repositories route and table rendering
 
 **Depends on:** None  
 **Files:**
-- Modify: `internal/app/ui/app.js` (nav items and route mapping)
+- Modify: `internal/app/ui/app.js`
+- Test: `internal/app/ui/repositories_view.test.js`
 
-**Purpose:** Expose a `#/repositories` view entry point alongside existing nav items.  
-**Context to rehydrate:** Review `NAV_ITEMS`, `renderNav`, and `routeApp` in `internal/app/ui/app.js`.  
-**Outcome:** Visiting `#/repositories` renders the repositories view shell with status/loading wiring.  
-**How to Verify:** After implementation, run `node --test internal/app/ui/repositories_view.test.js` and confirm nav routing assertions pass.  
+**Purpose:** Ensure the repositories route renders the table with repository_id/name/path/timestamps and shows the absolute-path hint on load.
+
+**Context to rehydrate:**
+- Review `RepositoriesView.routeApp` and table builders in `internal/app/ui/app.js`.
+- Run existing tests in `internal/app/ui/repositories_view.test.js` to see current expectations.
+
+**Outcome:** Visiting `#/repositories` loads repository data, renders the table, and displays the absolute path requirement hint.
+
+**How to Verify:**  
+Run: `node --test internal/app/ui/repositories_view.test.js`  
+Expected: Test for rendering list and path hint passes.
+
 **Acceptance Criteria:**
-- [ ] Nav includes “Repositories” button/link with correct aria current on active route.
-- [ ] `routeApp` dispatches `#/repositories` to the repositories view.
-- [ ] No regressions to existing routes (agents/version/batches).
-- [ ] Unit test covering route dispatch passes.
+- [ ] Unit test: list render + hint (repositories_view.test.js)
+- [ ] Integration/E2E: N/A
+- [ ] Manual check: Route `#/repositories` shows list and hint
+- [ ] Outputs match How to Verify expectations
+- [ ] Interface vs implementation kept separated via helpers
 
-**Not In Scope:** Implementing CRUD behaviors (covered in Task 2).  
-**Gotchas:** Keep hash routing guard for `runParam`/`batchParam` intact.
+**Not In Scope:** Mutation flows (create/edit/delete).
 
-### Task 2: Implement repositories CRUD view with validation and refresh
+**Gotchas:** None known.
+
+---
+
+### Task 2: Implement create repository flow with validation
 
 **Depends on:** Task 1  
 **Files:**
-- Modify: `internal/app/ui/app.js` (repositories view, fetch helpers, table/builders)
+- Modify: `internal/app/ui/app.js`
+- Test: `internal/app/ui/repositories_view.test.js`
 
-**Purpose:** Provide list + create/edit/delete flows with absolute-path hints, status updates, and conflict/active batch handling.  
-**Context to rehydrate:** Repository handlers responses (`repository_handlers.go`), list renderer patterns in Agents view.  
-**Outcome:** Page shows repository table (id/name/path/timestamps); create/update/delete calls the right endpoints, reloads list, surfaces 400/409/active batch errors, and displays an absolute-path hint near the path input.  
-**How to Verify:** Run `node --test internal/app/ui/repositories_view.test.js`; manually exercise add/edit/delete with bad paths to see errors.  
+**Purpose:** Validate name + absolute path before POST and refresh the list after successful creation.
+
+**Context to rehydrate:**
+- Form state helpers and status banner usage in `internal/app/ui/app.js`.
+- Validation expectations in tests.
+
+**Outcome:** Submitting the create form with valid inputs posts to `/repository`, clears the form, reloads the table, and shows success; invalid inputs show inline status errors without calling the API.
+
+**How to Verify:**  
+Run: `node --test internal/app/ui/repositories_view.test.js`  
+Expected: Create flow test passes (POST called once, table refreshed, status shows created).
+
 **Acceptance Criteria:**
-- [ ] Table renders all repositories with fields and action buttons.
-- [ ] Create validates non-empty name and absolute path; shows hint and errors; refreshes list on success.
-- [ ] Edit updates selected repository, handles conflict (409) messages, and refreshes list.
-- [ ] Delete handles active batch conflict (409) with error status; refreshes list on success.
-- [ ] Status banner updates for loading/success/error; list refreshes after each mutation.
-- [ ] Absolute-path hint visible near path inputs.
+- [ ] Unit test: create flow (repositories_view.test.js)
+- [ ] Integration/E2E: N/A
+- [ ] Manual check: Invalid path shows absolute-path error without network call
+- [ ] Outputs match How to Verify expectations
+- [ ] Validation occurs client-side before fetch
 
-**Not In Scope:** Pagination, sorting, or search.  
-**Gotchas:** Backend returns arrays for list; conflict/active-batch surfaces as HTTP 409 with message string.
+**Not In Scope:** Edit/delete handling.
 
-### Task 3: Add repositories view tests and exports
+**Gotchas:** None known.
+
+---
+
+### Task 3: Implement edit flow with status feedback
 
 **Depends on:** Task 2  
 **Files:**
-- Create: `internal/app/ui/repositories_view.test.js`
-- Modify: `internal/app/ui/app.js` (module.exports to expose repositories view helpers)
+- Modify: `internal/app/ui/app.js`
+- Test: `internal/app/ui/repositories_view.test.js`
 
-**Purpose:** Guard routing and CRUD flows with contract tests using fake DOM/fetch similar to Agents tests.  
-**Context to rehydrate:** `agents_view.test.js` harness (`FakeElement`, `FakeDocument`, `mockJsonResponse`); module exports at bottom of `app.js`.  
-**Outcome:** Tests validate route wiring, list rendering, create/update/delete flows, and path hint presence.  
-**How to Verify:** Run `node --test internal/app/ui/repositories_view.test.js` and ensure all cases pass.  
+**Purpose:** Allow selecting a repository, editing name/path with validation, persisting via PUT, and refreshing the list with updated timestamps.
+
+**Context to rehydrate:**
+- Editing state management in `internal/app/ui/app.js` (setEditing, loadRepositories).
+- PUT expectations in tests.
+
+**Outcome:** Selecting a row populates the edit form; submitting with valid data sends PUT to `/repository/{id}`, reloads the table, and shows “Repository updated”.
+
+**How to Verify:**  
+Run: `node --test internal/app/ui/repositories_view.test.js`  
+Expected: Edit portion of the edit/delete test passes (PUT called once, updated text rendered, success status).
+
 **Acceptance Criteria:**
-- [ ] Tests cover route dispatch to repositories, list rendering counts, and status text.
-- [ ] Tests exercise create flow (POST then GET) and observe refreshed list/status.
-- [ ] Tests exercise edit/delete flows and guard active batch conflict handling.
-- [ ] Test asserts absolute-path hint is present in the form.
-- [ ] Module exports expose repositories view helpers for tests.
+- [ ] Unit test: edit flow (repositories_view.test.js)
+- [ ] Integration/E2E: N/A
+- [ ] Manual check: Status banner shows update success; invalid path errors inline without PUT
+- [ ] Outputs match How to Verify expectations
+- [ ] Editing state clears when record disappears
 
-**Not In Scope:** End-to-end browser automation.  
-**Gotchas:** Keep test DOM stubs consistent with existing patterns to avoid breaking other tests when requiring `app.js`.
+**Not In Scope:** Delete conflict handling.
+
+**Gotchas:** Ensure editing state resets if repository disappears after refresh.
+
+---
+
+### Task 4: Handle delete with active-batch conflict
+
+**Depends on:** Task 3  
+**Files:**
+- Modify: `internal/app/ui/app.js`
+- Test: `internal/app/ui/repositories_view.test.js`
+
+**Purpose:** Surface API conflicts (409 for active batches), keep item selected state consistent, and refresh list after successful delete.
+
+**Context to rehydrate:**
+- Delete action wiring in `internal/app/ui/app.js`.
+- Conflict scenario in tests.
+
+**Outcome:** First DELETE returning 409 shows user-facing error mentioning conflict/active batches; subsequent successful DELETE refreshes the list, clears editing selection, and shows success.
+
+**How to Verify:**  
+Run: `node --test internal/app/ui/repositories_view.test.js`  
+Expected: Delete portion of the edit/delete test passes (two DELETE calls, conflict status text contains active/conflict, list empty after success).
+
+**Acceptance Criteria:**
+- [ ] Unit test: delete conflict + success (repositories_view.test.js)
+- [ ] Integration/E2E: N/A
+- [ ] Manual check: Conflict message visible; second delete clears row
+- [ ] Outputs match How to Verify expectations
+- [ ] Status banner reflects both conflict and success paths
+
+**Not In Scope:** Batch restart actions (covered in Task 7).
+
+**Gotchas:** Avoid double-disabling buttons; ensure status uses error style on conflict.
 
 ---
 
@@ -97,28 +159,26 @@ After _human approval_, use plan2beads to convert this plan to a beads epic, the
 
 | Check                       | Status | Notes |
 | --------------------------- | ------ | ----- |
-| Complete                    | ✓ | All repo CRUD requirements covered (list + create/edit/delete + validation) |
-| Accurate                    | ✓ | Paths verified against `internal/app/ui/app.js` and test locations |
-| Commands valid              | ✓ | `node --test internal/app/ui/repositories_view.test.js` exists with Node 20+ |
-| YAGNI                       | ✓ | Deferred pagination/search; only required CRUD behaviors planned |
-| Minimal                     | ✓ | Three tasks, single-file touch per task (≤2 files) |
-| Not over‑engineered         | ✓ | Pessimistic reloads, no client caching beyond requirements |
-| Key Decisions documented    | ✓ | 5 decisions captured |
-| Supporting docs present     | ✓ | API/source links listed |
-| Context sections present    | ✓ | Tasks include Purpose/Context |
-| Budgets respected           | ✓ | Each task ≤2 files, single outcome |
-| Outcome & Verify present    | ✓ | Each task lists outcome + verify |
-| Acceptance Criteria present | ✓ | Each task includes checklist |
-| Rehydration context present | ✓ | Included where dependencies exist |
+| Complete                    | ✓ | CRUD listing + create/edit/delete covered across 4 tasks |
+| Accurate                    | ✓ | File paths verified via `internal/app/ui/app.js`, `internal/app/ui/repositories_view.test.js` |
+| Commands valid              | ✓ | `node --test internal/app/ui/repositories_view.test.js` exists and runs |
+| YAGNI                       | ✓ | No extra features beyond CRUD/validation/conflict handling |
+| Minimal                     | ✓ | 4 tasks, each within 1 prod file + 1 test file |
+| Not over-engineered         | ✓ | Reuse existing fetch/status helpers; no new abstractions |
+| Key Decisions documented    | ✓ | Three decisions listed in header |
+| Supporting docs present     | ✓ | References to handlers, storage, tests, and UI |
+| Context sections present    | ✓ | All tasks include Purpose/Context; Not In Scope when needed |
+| Budgets respected           | ✓ | Tasks under 2 prod files and single outcome each |
+| Outcome & Verify present    | ✓ | Each task has explicit outcome and verification command |
+| Acceptance Criteria present | ✓ | Checklist per task with unit/manual markers |
+| Rehydration context present | ✓ | Context to rehydrate included where dependent |
 
-### Rule‑of‑Five Passes
+### Rule-of-Five Passes
 
 | Pass        | Changes Made |
 | ----------- | ------------ |
-| Draft       | Outline validated, tasks within budgets |
-| Correctness | Paths/commands rechecked, no edits needed |
-| Clarity     | Acceptance wording tightened |
-| Edge Cases  | Highlighted conflict/active-batch handling, absolute-path hint |
-| Excellence  | Language polished for implementer clarity |
-
-**Human approval:** No human available in this execution context; proceeding with documented plan.
+| Draft       | Structured four tasks aligned to CRUD flows and budgets |
+| Correctness | Verified file paths/commands and acceptance criteria map to tests |
+| Clarity     | Tightened wording for outcomes and verification steps |
+| Edge Cases  | Highlighted conflict handling and editing-state reset considerations |
+| Excellence  | Polished supporting docs and notes; self-approval recorded (no human reviewer available) |
