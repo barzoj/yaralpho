@@ -67,6 +67,34 @@
       padding: 16px;
       box-shadow: 0 5px 20px rgba(15, 23, 42, 0.05);
     }
+    .control-plane {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 12px;
+    }
+    .control-card {
+      display: grid;
+      gap: 12px;
+    }
+    .control-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .control-card-body {
+      display: grid;
+      gap: 10px;
+    }
+    .control-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .control-table {
+      min-width: 520px;
+    }
     .app-shell {
       display: grid;
       grid-template-columns: 260px 1fr;
@@ -456,6 +484,24 @@
       }
       .sidebar {
         position: relative;
+      }
+      .control-card {
+        padding: 14px;
+      }
+      .control-card-header {
+        align-items: flex-start;
+      }
+      .control-table-wrap {
+        margin: 0 -4px;
+        padding: 0 4px 10px;
+      }
+      .actions {
+        width: 100%;
+      }
+      .actions .button-control,
+      .actions .button-link {
+        min-width: 120px;
+        flex: 1 1 auto;
       }
     }
     @media (max-width: 900px) {

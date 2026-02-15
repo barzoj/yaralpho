@@ -1301,9 +1301,9 @@
 
     for (const repo of repositories) {
       const card = document.createElement("div");
-      card.className = "card";
+      card.className = "card control-card";
       const header = document.createElement("div");
-      header.className = "view-header";
+      header.className = "view-header control-card-header";
       const title = document.createElement("h3");
       title.textContent = repo?.name || repo?.repository_id || "Repository";
       const repoIdEl = document.createElement("div");
@@ -1313,6 +1313,7 @@
       header.appendChild(repoIdEl);
       card.appendChild(header);
       const body = document.createElement("div");
+      body.className = "control-card-body";
       card.appendChild(body);
       container.appendChild(card);
 
@@ -1356,9 +1357,20 @@
           ];
         });
 
-        body.appendChild(
-          buildTable(["Batch ID", "Tasks", "Status", "Actions"], rows)
+        const tableWrap = document.createElement("div");
+        tableWrap.className = "control-table-wrap";
+        tableWrap.style.overflowX = "auto";
+        tableWrap.style.width = "100%";
+        const table = buildTable(
+          ["Batch ID", "Tasks", "Status", "Actions"],
+          rows
         );
+        table.className = [table.className, "control-table"]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        tableWrap.appendChild(table);
+        body.appendChild(tableWrap);
       };
 
       await reloadBatches();

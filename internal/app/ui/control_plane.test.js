@@ -184,6 +184,16 @@ test("control plane renders repo batches and task list with scroll", async () =>
   assert.match(contentText, /Repo One/);
   assert.match(contentText, /b1/);
 
+  const controlPlane = findFirst(document.getElementById("content"), (node) =>
+    (node.className || "").includes("control-plane")
+  );
+  assert.ok(controlPlane, "control plane container present");
+
+  const firstCard = findFirst(controlPlane, (node) =>
+    (node.className || "").includes("control-card")
+  );
+  assert.ok(firstCard, "control card uses responsive class");
+
   const links = findAllTags(document.getElementById("content"), "A");
   assert.ok(
     links.some((l) => (l.href || "").includes("batch=b1")),
@@ -192,6 +202,13 @@ test("control plane renders repo batches and task list with scroll", async () =>
 
   const scroll = findFirst(document.getElementById("content"), (node) => node.style?.overflowY === "auto");
   assert.ok(scroll, "tasks rendered in scrollable container");
+
+  const tableWrap = findFirst(document.getElementById("content"), (node) =>
+    (node.className || "").includes("control-table-wrap") ||
+    node.style?.overflowX === "auto"
+  );
+  assert.ok(tableWrap, "table wrapper provides horizontal scroll");
+  assert.strictEqual(tableWrap.style.overflowX, "auto");
 
   const statusText = collectText(document.getElementById("status"));
   assert.match(statusText, /Loaded 1 repositories/);
