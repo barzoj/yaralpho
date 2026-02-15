@@ -10,6 +10,24 @@ class FakeElement {
     this.textContent = "";
     this.href = "";
     this.attributes = new Map();
+    this.classList = {
+      add: (...names) => {
+        names
+          .filter(Boolean)
+          .map((n) => String(n).trim())
+          .forEach((name) => {
+            const parts = this.className ? this.className.split(/\s+/).filter(Boolean) : [];
+            if (!parts.includes(name)) {
+              parts.push(name);
+              this.className = parts.join(" ");
+            }
+          });
+      },
+      contains: (name) => {
+        const parts = this.className ? this.className.split(/\s+/).filter(Boolean) : [];
+        return parts.includes(name);
+      },
+    };
   }
 
   appendChild(child) {
@@ -50,14 +68,30 @@ class FakeDocument {
 function setupDom() {
   global.Node = FakeElement;
   global.document = new FakeDocument();
-  const ids = ["status", "content", "view-title", "breadcrumbs", "nav", "footer-content"];
+  const ids = [
+    "status",
+    "content",
+    "view-title",
+    "breadcrumbs",
+    "nav",
+    "nav-dropdown",
+    "nav-toggle",
+    "footer-content",
+  ];
   ids.forEach((id) => {
-    const el = new FakeElement(id === "nav" ? "nav" : "div");
+    const tag = id === "nav" ? "nav" : "div";
+    const el = new FakeElement(tag);
     document._byId.set(id, el);
     document.body.appendChild(el);
   });
+  const navDropdown = document.getElementById("nav-dropdown");
+  const nav = document.getElementById("nav");
+  if (navDropdown && nav) {
+    navDropdown.appendChild(nav);
+  }
   global.window = {
     location: { hash: "", protocol: "http:", host: "localhost" },
+    innerWidth: 1200,
     addEventListener() {},
     removeEventListener() {},
   };
@@ -70,14 +104,20 @@ function loadModule() {
 
 test("renderNav stacks links vertically and preserves status layout", () => {
   setupDom();
-  const { VersionView } = loadModule();
+  const { VersionView, NavMenu } = loadModule();
 
   VersionView.renderNav("control-plane");
+  NavMenu.syncNavMenuForViewport();
 
   const navEl = document.getElementById("nav");
+  const navDropdown = document.getElementById("nav-dropdown");
   const statusEl = document.getElementById("status");
   assert.ok(navEl.className.includes("nav-stack"), "nav-stack class applied");
   assert.ok(navEl.className.includes("nav-list"), "nav-list class applied");
+  assert.ok(
+    navDropdown.className.includes("nav-stack"),
+    "nav dropdown keeps stacking class for desktop layout"
+  );
   assert.ok(navEl.children.length >= 4, "nav contains links");
 
   navEl.children.forEach((link) => {

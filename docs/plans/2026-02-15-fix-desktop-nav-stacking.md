@@ -1,90 +1,156 @@
-# Fix desktop nav stacking Implementation Plan
+# Fix Desktop Nav Stacking Implementation Plan
 
 After _human approval_, use plan2beads to convert this plan to a beads epic, then use `superpowers:subagent-driven-development` for parallel execution.
 
-**Goal:** Ensure the desktop navigation renders as a vertical stack with consistent spacing without affecting existing views or the status banner.
+**Goal:** Align the desktop navigation into a vertical stack with consistent spacing while keeping mobile behavior and existing pages unaffected.
 
-**Architecture:** Keep the current vanilla HTML/JS structure, introduce nav container classes and CSS to force a column layout on desktop, and adjust the nav rendering helper to emit the new structure. Validate behavior via DOM-focused unit tests using the existing fake document pattern.
+**Architecture:** Keep the current sidebar/nav container but tighten its markup and CSS for a columnar layout; adjust `renderNav` to enforce vertical stacking and active-state semantics without impacting the mobile dropdown. Validate layout via DOM-focused node tests and a manual desktop viewport check against the design.
 
-**Tech Stack:** Vanilla HTML/CSS/JS, node:test with custom fake DOM.
+**Tech Stack:** HTML/CSS, vanilla JS (DOM), node:test.
 
 **Key Decisions:**
 
-- **Layout approach:** Use a grid/flex column on the nav container instead of inline buttons — forces vertical stacking and predictable gaps on desktop.
-- **Structure:** Add nav wrapper/list classes while preserving existing button-link styling — minimizes risk to other consumers and keeps anchor semantics.
-- **Validation:** Cover nav layout with a dedicated node:test using the existing FakeDocument pattern — prevents regressions without needing a browser.
+- **Layout strategy:** Use CSS grid/column classes on the sidebar nav container instead of inline styles — minimal change and consistent gaps across viewports.
+- **Nav rendering:** Continue generating links in `renderNav` with centralized NAV_ITEMS — avoids duplication and keeps routing unchanged.
+- **Validation:** Rely on `node --test` DOM fakes plus a manual desktop viewport check — fast feedback and visual assurance that spacing and banner alignment remain correct.
 
 ---
 
 ## Supporting Documentation
 
-- [MDN: CSS Flexible Box Layout](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_flexible_box_layout) — reference for `flex-direction: column` and gap handling for vertical stacks.
-- [MDN: CSS Grid Layout](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_grid_layout) — grid column patterns with `gap` for consistent spacing.
-- [MDN: nav element](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/nav) — semantics for navigation sections.
-- Repository examples: `internal/app/ui/run_layout.test.js` and `internal/app/ui/version_view.test.js` show the fake DOM/testing pattern and module loading with `delete require.cache`.
+- MDN CSS Grid Layout — https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_grid_layout (reference for column stacking and gap control).
+- MDN `display: flex` and column direction — https://developer.mozilla.org/en-US/docs/Web/CSS/flex-direction (verify flex/grid choices for vertical nav).
+- WAI-ARIA Authoring Practices: Navigation — https://www.w3.org/WAI/ARIA/apg/patterns/landmarks/examples/navigation.html (ensure nav and aria-current usage).
+- Node.js `node:test` module — https://nodejs.org/api/test.html (for structuring DOM-focused tests).
+- Chrome DevTools device toolbar — https://developer.chrome.com/docs/devtools/device-mode/ (desktop viewport manual verification shortcut).
 
-## Plan
+---
 
-### Task 1: Add desktop nav container structure and styles
+### Task 1: Solidify sidebar markup for vertical nav stack
 
 **Depends on:** None  
 **Files:**
 
-- Modify: `internal/app/ui/index.html` (style block and nav container markup)
+- Modify: `internal/app/ui/index.html` (sidebar/nav container markup and classes)
 
-**Purpose:** Introduce nav container/list classes and desktop CSS to force vertical stacking with consistent spacing while keeping existing sidebar/sticky behavior.
+**Purpose:** Ensure the desktop nav container uses a column-friendly structure and class hooks so links naturally stack with consistent spacing.
 
-**Context to rehydrate:**
+**Context to rehydrate:** Review current sidebar structure in `internal/app/ui/index.html` around the `<aside>` navigation block.
 
-- Review current sidebar/nav markup in `internal/app/ui/index.html` (`.app-shell`, `.sidebar`, `nav#nav`).
-- Confirm existing button styles (`.button-link`) and sidebar sticky layout.
-
-**Outcome:** Desktop nav area uses a dedicated container/list class that applies a column layout and spacing so nav links stack vertically without wrapping.
+**Outcome:** Sidebar markup exposes a stable nav container that applies the stacking classes and leaves mobile dropdown hooks intact.
 
 **How to Verify:**  
-Run: `rg "nav-list" internal/app/ui/index.html && rg "nav-stack" internal/app/ui/index.html`  
-Expected: style definitions for the nav list/stack classes and nav markup referencing them.
+Run: `rg "nav-stack" internal/app/ui/index.html`  
+Expected: Sidebar nav container includes the stacking class on the outer nav wrapper used for desktop rendering.
 
 **Acceptance Criteria:**
 
-- [ ] Nav container/list classes added in markup and styled for column layout with gap on desktop.
-- [ ] Sidebar sticky behavior remains defined (no changes to top offset).
-- [ ] No changes to main/status content structure.
-- [ ] Command above finds both style rules and class usage.
+- [ ] Unit test(s): N/A (markup only)
+- [ ] Integration test(s): N/A
+- [ ] Manual or E2E check: Desktop load shows nav container rendered (performed in Task 4)
+- [ ] Outputs match expectations from How to Verify
+- [ ] Interface and implementation separation — DOM hooks preserved for JS render
+- [ ] DAL layer tasks do not leak database-specific types; interface-based design for testability and flexibility (N/A)
 
-**Not In Scope:** Mobile/hamburger behavior (handled by yaralpho-ydb.10).  
-**Gotchas:** Preserve existing `.button-link` styling; new classes should compose rather than replace it.
+**Not In Scope:** Changing nav link labels, routes, or mobile dropdown behavior.
 
-### Task 2: Render nav with new layout classes and add nav layout test
+**Gotchas:** Keep existing `nav-dropdown` container for mobile; avoid altering header/footer layout.
+
+### Task 2: Enforce vertical stacking in nav render logic
 
 **Depends on:** Task 1  
 **Files:**
 
-- Modify: `internal/app/ui/app.js` (nav rendering helper)
-- Create: `internal/app/ui/nav_layout.test.js`
+- Modify: `internal/app/ui/app.js` (renderNav and nav menu layout helpers)
 
-**Purpose:** Update `renderNav` to emit the new nav structure/classes and lock in vertical stacking via tests so nav links stay in a single column and status/banner layout remains untouched.
+**Purpose:** Make `renderNav` apply stacking-friendly class names and container usage so desktop nav links render as a vertical column while preserving mobile menu behavior and ARIA states.
 
 **Context to rehydrate:**
 
-- See `renderNav` and `NAV_ITEMS` in `internal/app/ui/app.js`.
-- Review test scaffolding patterns in `internal/app/ui/run_layout.test.js` and `version_view.test.js` (FakeDocument, cache busting).
+- Review `renderNav`, `ensureNavMenuBindings`, and related nav constants in `internal/app/ui/app.js`.
+- Confirm NAV_ITEMS definitions and active route handling.
 
-**Outcome:** `renderNav` outputs nav items within the new container/list structure with classes enabling column layout; automated test guards the DOM structure and ensures nav/status nodes remain separate.
+**Outcome:** `renderNav` produces vertically stacked nav links on desktop, keeps button styles, and maintains active-state/ARIA without disturbing mobile dropdown logic.
 
 **How to Verify:**  
 Run: `node --test internal/app/ui/nav_layout.test.js`  
-Expected: All tests pass, confirming nav DOM structure/classes and that the status element remains independent.
+Expected: PASS showing nav-stack/nav-list classes applied and active link retained; no horizontal layout regressions.
 
 **Acceptance Criteria:**
 
-- [ ] `renderNav` uses the new container/list classes without breaking existing routes.
-- [ ] Test file exercises nav rendering and asserts class/structure suitable for vertical stacking.
-- [ ] Test ensures status/banner element is not mutated or reparented by nav rendering.
-- [ ] `node --test internal/app/ui/nav_layout.test.js` passes.
+- [ ] Unit test(s): `internal/app/ui/nav_layout.test.js`
+- [ ] Integration test(s): `internal/app/ui/nav_menu.test.js` (regression guard for menu toggling)
+- [ ] Manual or E2E check: N/A (covered in Task 4)
+- [ ] Outputs match expectations from How to Verify
+- [ ] Interface and implementation separation - class names sourced from render logic, not scattered constants
+- [ ] DAL layer tasks do not leak database-specific types; interface-based design for testability and flexibility (N/A)
 
-**Not In Scope:** Styling changes outside nav (e.g., content cards, tables).  
-**Gotchas:** Clear module cache in the test before requiring `app.js` to pick up global DOM fakes; mirror existing FakeDocument patterns.
+**Not In Scope:** Changing routing or nav items.
+
+**Gotchas:** Ensure desktop rendering does not depend on the mobile dropdown `data-open` attribute; keep existing focus management intact.
+
+### Task 3: Expand nav layout test coverage
+
+**Depends on:** Task 2  
+**Files:**
+
+- Modify: `internal/app/ui/nav_layout.test.js` (add expectations for vertical stacking and non-wrapping)
+
+**Purpose:** Strengthen automated coverage to assert vertical stacking, spacing classes, and that status banner positioning remains unaffected.
+
+**Context to rehydrate:** Review existing fake DOM helpers and nav assertions in `internal/app/ui/nav_layout.test.js`.
+
+**Outcome:** Tests fail if nav renders horizontally or drops required classes/structure; active-state and status placement remain guarded.
+
+**How to Verify:**  
+Run: `node --test internal/app/ui/nav_layout.test.js`  
+Expected: PASS with new assertions; failure would indicate horizontal layout or missing class hooks.
+
+**Acceptance Criteria:**
+
+- [ ] Unit test(s): `internal/app/ui/nav_layout.test.js` (updated)
+- [ ] Integration test(s): `internal/app/ui/nav_menu.test.js` (no regressions)
+- [ ] Manual or E2E check: N/A
+- [ ] Outputs match expectations from How to Verify
+- [ ] Interface and implementation separation - tests validate DOM contract, not implementation internals
+- [ ] DAL layer tasks do not leak database-specific types; interface-based design for testability and flexibility (N/A)
+
+**Not In Scope:** Adding new nav routes or altering NAV_ITEMS.
+
+**Gotchas:** Keep fake DOM aligned with production nav structure; avoid brittle ordering assertions beyond class/structure essentials.
+
+### Task 4: Manual desktop verification
+
+**Depends on:** Task 3  
+**Files:**
+
+- Test: `internal/app/ui/nav_layout.test.js` (already executed)
+
+**Purpose:** Confirm visually that desktop nav stacks vertically with consistent spacing and that the status banner alignment remains intact in the real DOM/CSS.
+
+**Context to rehydrate:**
+
+- Launch the app via `./run_ralph.sh` or `./build.sh && ./run_ralph.sh` (if needed) and open `/app`.
+- Set browser width ≥ 1024px using DevTools device toolbar.
+
+**Outcome:** Desktop view shows nav links in a single vertical column with even gaps; no horizontal wrapping; status banner and main content remain aligned.
+
+**How to Verify:**  
+Run: `node --test internal/app/ui/nav_layout.test.js && node --test internal/app/ui/nav_menu.test.js`  
+Then: Load `/app` at ≥1024px width; visually confirm vertical nav column and aligned status banner.
+
+**Acceptance Criteria:**
+
+- [ ] Unit test(s): `internal/app/ui/nav_layout.test.js`
+- [ ] Integration test(s): `internal/app/ui/nav_menu.test.js`
+- [ ] Manual or E2E check: Desktop viewport manual check performed
+- [ ] Outputs match expectations from How to Verify
+- [ ] Interface and implementation separation - UI verified via behavior, not internal DOM tricks
+- [ ] DAL layer tasks do not leak database-specific types; interface-based design for testability and flexibility (N/A)
+
+**Not In Scope:** Mobile hamburger/menu redesign (covered by dependent task 10), content changes beyond nav layout.
+
+**Gotchas:** Verify at desktop breakpoints only; mobile behavior is validated separately by existing tests and task 10.
 
 ---
 
@@ -92,28 +158,28 @@ Expected: All tests pass, confirming nav DOM structure/classes and that the stat
 
 ### Plan Verification Checklist
 
-| Check                       | Status | Notes |
-| --------------------------- | ------ | ----- |
-| Complete                    | ✓ | Covers nav structure, helper, and test requirements. |
-| Accurate                    | ✓ | File paths verified: `internal/app/ui/index.html`, `internal/app/ui/app.js`, new `internal/app/ui/nav_layout.test.js`. |
-| Commands valid              | ✓ | `rg` and `node --test internal/app/ui/nav_layout.test.js` runnable in repo. |
-| YAGNI                       | ✓ | Only nav layout + test; no extra styling or features. |
-| Minimal                     | ✓ | Two implementation tasks, each within file/step budgets. |
-| Not over‑engineered         | ✓ | Stays with vanilla DOM/CSS; no new deps. |
-| Key Decisions documented    | ✓ | Three decisions recorded in header. |
-| Supporting docs present     | ✓ | MDN links and repo references included. |
-| Context sections present    | ✓ | Tasks include Purpose, Context, Not In Scope/Gotchas. |
-| Budgets respected           | ✓ | ≤2 production files per task; single verification outcome each. |
-| Outcome & Verify present    | ✓ | Each task specifies outcome and verification command. |
-| Acceptance Criteria present | ✓ | Checklists provided per task. |
-| Rehydration context present | ✓ | Context to rehydrate listed per task. |
+| Check                       | Status | Notes                                     |
+| --------------------------- | ------ | ----------------------------------------- |
+| Complete                    | ✓      | Covers markup, render logic, tests, and manual desktop check; dependencies noted. |
+| Accurate                    | ✓      | Paths verified in repo; nav_layout/nav_menu tests located in `internal/app/ui`. |
+| Commands valid              | ✓      | `node --test internal/app/ui/nav_layout.test.js internal/app/ui/nav_menu.test.js` passes. |
+| YAGNI                       | ✓      | Only tasks needed for desktop nav stacking; no new routes/features. |
+| Minimal                     | ✓      | Four small tasks; each within file/time budgets. |
+| Not over‑engineered         | ✓      | Reuses existing NAV_ITEMS and menu bindings; minimal structural changes. |
+| Key Decisions documented    | ✓      | Three decisions captured in header. |
+| Supporting docs present     | ✓      | MDN, WAI-ARIA, node:test, and DevTools references listed. |
+| Context sections present    | ✓      | Each task includes Purpose and Context (and scope notes where relevant). |
+| Budgets respected           | ✓      | ≤2 production files per task; single outcome per verification. |
+| Outcome & Verify present    | ✓      | Every task states Outcome and How to Verify. |
+| Acceptance Criteria present | ✓      | Checklists included for all tasks. |
+| Rehydration context present | ✓      | Tasks with dependencies include context reminders. |
 
 ### Rule‑of‑Five Passes
 
-| Pass        | Changes Made |
-| ----------- | ------------ |
-| Draft       | Structured plan with two tasks covering markup/CSS and helper/test. |
-| Correctness | Validated file paths/commands and alignment to requirements. |
-| Clarity     | Clarified outcomes, verification steps, and scope boundaries. |
-| Edge Cases  | Noted sticky sidebar preservation and mobile scope deferral. |
-| Excellence  | Added supporting docs and key decision rationale. |
+| Pass        | Changes Made                             |
+| ----------- | ---------------------------------------- |
+| Draft       | Structured header, supporting docs, four scoped tasks, and verification record. |
+| Correctness | Verified file paths/commands; checklist updated to ✓. |
+| Clarity     | Simplified task scopes and dependencies; ensured context and scope notes are explicit. |
+| Edge Cases  | Confirmed budgets, dependency order, and mobile scope exclusion while focusing on desktop. |
+| Excellence  | Polished outcomes/verification language and doc references for execution readiness. |

@@ -17,6 +17,14 @@
       --success: #15803d;
       --warning: #b45309;
     }
+    @media (min-width: 769px) {
+      .nav-dropdown {
+        position: static;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+      }
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -154,6 +162,8 @@
     }
     .nav-dropdown {
       width: 100%;
+      display: grid;
+      gap: 8px;
     }
     .sidebar-header {
       font-weight: 700;

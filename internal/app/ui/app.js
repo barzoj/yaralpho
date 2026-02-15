@@ -530,6 +530,9 @@
     if (!navEl) return;
     navEl.innerHTML = "";
     navEl.className = "nav-stack nav-list";
+    if (navDropdownEl && typeof navDropdownEl.classList?.add === "function") {
+      navDropdownEl.classList.add("nav-stack");
+    }
     NAV_ITEMS.forEach((item) => {
       const link = document.createElement("a");
       link.href = buildNavHref(item.route === "batches" ? "" : item.route);
