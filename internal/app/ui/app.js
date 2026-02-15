@@ -253,6 +253,7 @@
 
   const NAV_ITEMS = [
     { label: "Batches", href: "#/", route: "batches" },
+    { label: "Repositories", href: "#/repositories", route: "repositories" },
     { label: "Agents", href: "#/agents", route: "agents" },
     { label: "Version", href: "#/version", route: "version" },
   ];
@@ -362,6 +363,13 @@
     return [];
   }
 
+  async function fetchRepositoriesList() {
+    const data = await fetchJSON("/repository");
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.repositories)) return data.repositories;
+    return [];
+  }
+
   function buildAgentTable(agents, { onEdit, onDelete }) {
     const rows = (agents || []).map((agent) => {
       const status = agent?.status || "unknown";
@@ -416,6 +424,22 @@
     if (!form) return;
     const controls = form.querySelectorAll
       ? form.querySelectorAll("input, select, button")
+      : form.children || [];
+    if (controls.forEach) {
+      controls.forEach((node) => {
+        if (node) node.disabled = !!disabled;
+      });
+    } else {
+      for (const node of controls) {
+        if (node) node.disabled = !!disabled;
+      }
+    }
+  }
+
+  function setRepositoryFormState(form, disabled) {
+    if (!form) return;
+    const controls = form.querySelectorAll
+      ? form.querySelectorAll("input, button")
       : form.children || [];
     if (controls.forEach) {
       controls.forEach((node) => {
@@ -628,6 +652,238 @@
     });
 
     await loadAgents(false);
+  }
+
+  async function renderRepositoriesView() {
+    viewTitle.textContent = "Repositories";
+    renderBreadcrumbs([{ label: "Repositories" }]);
+    setStatus("Loading repositories…", "loading");
+    clearContent();
+
+    let repositories = [];
+    let editingId = "";
+
+    const container = document.createElement("div");
+    container.className = "repositories-view";
+
+    const createForm = document.createElement("form");
+    createForm.className = "card";
+    const createHeader = document.createElement("h3");
+    createHeader.textContent = "Create repository";
+    createForm.appendChild(createHeader);
+    const createName = document.createElement("input");
+    createName.type = "text";
+    createName.placeholder = "Name";
+    const createPath = document.createElement("input");
+    createPath.type = "text";
+    createPath.placeholder = "/absolute/path/to/repo";
+    const createHint = document.createElement("div");
+    createHint.className = "pill";
+    createHint.textContent = "Path must be absolute (starts with /)";
+    const createSubmit = document.createElement("button");
+    createSubmit.type = "submit";
+    createSubmit.textContent = "Create";
+    createForm.appendChild(createName);
+    createForm.appendChild(createPath);
+    createForm.appendChild(createHint);
+    createForm.appendChild(createSubmit);
+
+    const editForm = document.createElement("form");
+    editForm.className = "card";
+    const editHeader = document.createElement("h3");
+    editHeader.textContent = "Edit repository";
+    editForm.appendChild(editHeader);
+    const editHint = document.createElement("div");
+    editHint.className = "pill";
+    editHint.textContent = "Select a repository to edit";
+    editForm.appendChild(editHint);
+    const editName = document.createElement("input");
+    editName.type = "text";
+    editName.placeholder = "Name";
+    const editPath = document.createElement("input");
+    editPath.type = "text";
+    editPath.placeholder = "/absolute/path/to/repo";
+    const editPathHint = document.createElement("div");
+    editPathHint.className = "pill";
+    editPathHint.textContent = "Path must be absolute (starts with /)";
+    const editSubmit = document.createElement("button");
+    editSubmit.type = "submit";
+    editSubmit.textContent = "Update";
+    editSubmit.disabled = true;
+    const editCancel = document.createElement("button");
+    editCancel.type = "button";
+    editCancel.textContent = "Clear";
+    editCancel.disabled = true;
+    editForm.appendChild(editName);
+    editForm.appendChild(editPath);
+    editForm.appendChild(editPathHint);
+    editForm.appendChild(editSubmit);
+    editForm.appendChild(editCancel);
+
+    const tableContainer = document.createElement("div");
+    tableContainer.className = "card";
+
+    container.appendChild(createForm);
+    container.appendChild(editForm);
+    container.appendChild(tableContainer);
+    contentEl.appendChild(container);
+
+    function setEditing(repo) {
+      editingId = repo?.repository_id || "";
+      if (editingId) {
+        editHint.textContent = `Editing ${repo.name || editingId}`;
+        editName.value = repo.name || "";
+        editPath.value = repo.path || "";
+        editSubmit.disabled = false;
+        editCancel.disabled = false;
+      } else {
+        editHint.textContent = "Select a repository to edit";
+        editName.value = "";
+        editPath.value = "";
+        editSubmit.disabled = true;
+        editCancel.disabled = true;
+      }
+    }
+
+    function renderTable(list) {
+      tableContainer.innerHTML = "";
+      const rows = (list || []).map((repo) => {
+        const actions = document.createElement("div");
+        actions.className = "actions";
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.textContent = "Edit";
+        editBtn.addEventListener("click", () => setEditing(repo));
+        actions.appendChild(editBtn);
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.addEventListener("click", async () => {
+          try {
+            setStatus(`Deleting ${repo.name || repo.repository_id}…`, "loading");
+            await fetchJSON(`/repository/${encodeURIComponent(repo.repository_id)}`, {
+              method: "DELETE",
+            });
+            if (repo.repository_id === editingId) {
+              setEditing(null);
+            }
+            await loadRepositories(false);
+            setStatus("Repository deleted", "success");
+          } catch (err) {
+            setStatus(err.message || "Failed to delete repository", "error");
+          }
+        });
+        actions.appendChild(deleteBtn);
+
+        return [
+          repo?.repository_id || "—",
+          repo?.name || "—",
+          repo?.path || "—",
+          formatDate(repo?.created_at),
+          formatDate(repo?.updated_at),
+          actions,
+        ];
+      });
+
+      if (!rows.length) {
+        tableContainer.appendChild(emptyState("No repositories found."));
+        return;
+      }
+
+      tableContainer.appendChild(
+        buildTable(
+          ["Repository ID", "Name", "Path", "Created", "Updated", "Actions"],
+          rows
+        )
+      );
+    }
+
+    async function loadRepositories(showStatus = true) {
+      try {
+        if (showStatus) {
+          setStatus("Loading repositories…", "loading");
+        }
+        repositories = await fetchRepositoriesList();
+        if (editingId && !repositories.find((r) => r.repository_id === editingId)) {
+          setEditing(null);
+        }
+        renderTable(repositories);
+        const count = repositories.length;
+        setStatus(`Loaded ${count} repositor${count === 1 ? "y" : "ies"}`, "success");
+      } catch (err) {
+        tableContainer.innerHTML = "";
+        tableContainer.appendChild(emptyState("Unable to load repositories."));
+        setStatus(err.message || "Failed to load repositories", "error");
+      }
+    }
+
+    function validateRepositoryInput(name, path) {
+      if (!name) {
+        setStatus("Name is required", "error");
+        return false;
+      }
+      if (!path || !path.startsWith("/")) {
+        setStatus("Path must be absolute (starts with /)", "error");
+        return false;
+      }
+      return true;
+    }
+
+    createForm.addEventListener("submit", async (evt) => {
+      evt.preventDefault();
+      const name = (createName.value || "").trim();
+      const path = (createPath.value || "").trim();
+      if (!validateRepositoryInput(name, path)) return;
+      setRepositoryFormState(createForm, true);
+      try {
+        setStatus(`Creating ${name}…`, "loading");
+        await fetchJSON("/repository", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, path }),
+        });
+        createName.value = "";
+        createPath.value = "";
+        await loadRepositories(false);
+        setStatus("Repository created", "success");
+      } catch (err) {
+        setStatus(err.message || "Failed to create repository", "error");
+      } finally {
+        setRepositoryFormState(createForm, false);
+      }
+    });
+
+    editCancel.addEventListener("click", () => setEditing(null));
+
+    editForm.addEventListener("submit", async (evt) => {
+      evt.preventDefault();
+      if (!editingId) {
+        setStatus("Select a repository to edit", "error");
+        return;
+      }
+      const name = (editName.value || "").trim();
+      const path = (editPath.value || "").trim();
+      if (!validateRepositoryInput(name, path)) return;
+      setRepositoryFormState(editForm, true);
+      try {
+        setStatus(`Updating ${name}…`, "loading");
+        await fetchJSON(`/repository/${encodeURIComponent(editingId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, path }),
+        });
+        await loadRepositories(false);
+        setStatus("Repository updated", "success");
+      } catch (err) {
+        setStatus(err.message || "Failed to update repository", "error");
+      } finally {
+        setRepositoryFormState(editForm, false);
+      }
+    });
+
+    await loadRepositories(false);
   }
 
   function buildTable(headers, rows) {
@@ -1995,6 +2251,13 @@
       renderNav,
       routeApp,
     };
+    module.exports.RepositoriesView = {
+      renderRepositoriesView,
+      fetchRepositoriesList,
+      getRouteFromHash,
+      renderNav,
+      routeApp,
+    };
   }
 
   function getRouteFromHash(rawHash) {
@@ -2002,6 +2265,7 @@
     const normalized = hash.replace(/^#/, "").replace(/^\/+/, "").trim();
     if (!normalized) return "";
     const [path] = normalized.split(/[?#]/);
+    if (path === "repositories") return "repositories";
     if (path === "version") return "version";
     if (path === "agents") return "agents";
     return "";
@@ -2016,6 +2280,10 @@
     if (batchParam) {
       renderNav("batches");
       return renderRuns(batchParam);
+    }
+    if (route === "repositories") {
+      renderNav("repositories");
+      return renderRepositoriesView();
     }
     if (route === "agents") {
       renderNav("agents");
