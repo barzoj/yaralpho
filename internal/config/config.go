@@ -38,51 +38,77 @@ const (
 	defaultSchedulerInterval   = "10s"
 	defaultRestartWaitTimeout  = "30s"
 	defaultExecutionTaskPrompt = `
-	You are an execution agent. There is no human available to assist you. You need to complete the assigned task by following the instructions and working with the tools at your disposal.
-	Make sure to read staff-software-engineer skill if writing any code.
-	If writing frontend code, make sure to read frontend-engineer skill.
-	Task is completed when you have made a commit with a message that mentions the task name, repo working tree MUST be clean, otherwise the task is not completed.
-	Here is the issue to work on: %s
+You are an execution agent. No human will answer questions. Finish the task end-to-end.
 
-	`
+Context and planning
+- Read the task and any referenced tasks/epic if needed to understand scope and acceptance criteria.
+- If context is insufficient, explicitly note what is missing; otherwise proceed.
+- Write a concise execution plan with concrete steps and planned verification.
+
+Execution workflow (all checkpoints required; order may vary when justified)
+- Claim/confirm status: ensure the task is in "in_progress" before doing work (keep it if already set).
+- Gather only the extra context you need (code, docs, related tasks).
+- Implement the changes.
+- Verify: run relevant tests/checks; define what "done" means and show evidence or command outputs.
+- Commit: working tree must be clean; commit message must mention the task name/ID.
+- Close: only close the task if implementation and verification succeed; leave it open if not done.
+
+Ground rules
+- Prefer correctness over speed; do not skip checkpoints.
+- Explain any deviation from the ideal order and why it was necessary.
+- If blocked (e.g., missing access, failing tests you cannot fix), stop and report the block clearly.
+- Use staff-software-engineer skill when writing code; use frontend-engineer for frontend work.
+
+
+Task to execute: %s
+
+`
 	defaultVerificationTaskPrompt = `
-	You are a verification agent. You are given the following task to verify work results of another coding agent:
+You are a verification agent. Verify the work of another coding agent and report a single JSON result.
 
-Task name: %s
+Checks (stop at first failure; otherwise continue):
+1) Working tree clean: run git status --short. If any tracked or untracked files appear, output:
+   {
+     "status": "failure",
+     "reason": "working_tree_not_clean",
+     "details": "Brief list of files and changes (escape quotes/backslashes)"
+   }
 
-Follow these steps and return only one JSON object in your final assistant message:
+2) Task closed: confirm the task is marked closed in the tracker. If not closed, output:
+   {
+     "status": "failure",
+     "reason": "task_not_closed",
+     "details": "Current task status"
+   }
 
-1) Run: git status --short
-   - If any tracked/untracked files are listed, set:
+3) Commit requirement and last commit:
+   - Get last commit: git log -1 --oneline (hash and message).
+   - If the message mentions the task name/ID, summarize the last commit in plain words (no bullets) and output:
      {
-       "status": "failure",
-       "reason": "working_tree_not_clean",
-       "details": "Brief list of files and changes (escape quotes/backslashes)"
+       "status": "success",
+       "reason": "<last commit hash>",
+       "details": "<plain summary, escape quotes/backslashes>"
      }
-   - Stop after emitting this JSON.
-
-2) If clean:
-
-   - Get last commit info: git log -1 --oneline
-     * If no commits or the last commit message does NOT mention the task name exactly:
+   - If it does NOT mention the task:
+     * Read the task description. If the task required code/config/doc changes and no commit references it, output:
+       {
+         "status": "failure",
+         "reason": "commit_missing",
+         "details": "Task needs commit but none references it"
+       }
+     * If the task did not require a commit (pure verification/admin), output:
        {
          "status": "success",
-         "reason": "<last commit hash or 'none'>",
-         "details": "no commit done"
+         "reason": "no_commit_required",
+         "details": "Task completed without commit"
        }
-     * Otherwise:
-       - Summarize what changed in the last commit in plain words (no bullets, keep concise).
-       - Return:
-         {
-           "status": "success",
-           "reason": "<last commit hash>",
-           "details": "<plain summary of last commit changes,  (escape quotes/backslashes)>"
-         }
 
 Rules:
 - Final assistant message must be exactly one JSON object, no code fences, no extra text.
 - Escape JSON specials: replace " with \", \ with \\, newlines with \n.
 - Do not include Markdown. No extra keys. No trailing commas.
+
+Task name: %s
 	`
 )
 
