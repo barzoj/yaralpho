@@ -317,6 +317,15 @@
       padding: 16px;
       color: var(--muted);
       font-size: 13px;
+      background: var(--card);
+      border-top: 1px solid var(--border);
+    }
+    .layout-footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     @media (max-width: 900px) {
       .app-shell {
@@ -349,8 +358,10 @@
       </section>
     </div>
   </main>
-  <footer class="layout-footer">
-    <div class="layout-footer-inner">Footer</div>
+  <footer class="layout-footer" role="contentinfo">
+    <div id="footer-content" class="layout-footer-inner">
+      <span class="footer-placeholder">Footer placeholder — add helpful links soon.</span>
+    </div>
   </footer>
   <script src="/app/static/live_merge.js"></script>
   <script src="/app/static/live_reconnect.js"></script>

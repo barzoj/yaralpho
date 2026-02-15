@@ -5,6 +5,8 @@
   const breadcrumbsEl = document.getElementById("breadcrumbs");
   const navEl = document.getElementById("nav");
   const runLayoutHelpers = typeof RunLayout !== "undefined" ? RunLayout : {};
+  const footerContentEl = document.getElementById("footer-content");
+  const DEFAULT_FOOTER_TEXT = "Footer placeholder — add helpful links soon.";
 
   const params = new URLSearchParams(window.location.search);
   const batchParam = params.get("batch");
@@ -249,6 +251,13 @@
     const a = createLink(href, text);
     a.className = "button-link";
     return a;
+  }
+
+  function setFooterContent(text) {
+    if (!footerContentEl) return;
+    const nextText =
+      text === null || text === undefined ? DEFAULT_FOOTER_TEXT : String(text);
+    footerContentEl.textContent = nextText;
   }
 
   const NAV_ITEMS = [
@@ -2465,6 +2474,10 @@
       renderNav,
       routeApp,
     };
+    module.exports.Footer = {
+      setFooterContent,
+      DEFAULT_FOOTER_TEXT,
+    };
   }
 
   function getRouteFromHash(rawHash) {
@@ -2516,4 +2529,5 @@
 
   window.addEventListener("hashchange", handleHashChange);
   document.addEventListener("DOMContentLoaded", routeApp);
+  setFooterContent(DEFAULT_FOOTER_TEXT);
 })();
