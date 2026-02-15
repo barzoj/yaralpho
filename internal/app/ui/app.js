@@ -10,10 +10,6 @@
   const footerContentEl = document.getElementById("footer-content");
   const DEFAULT_FOOTER_TEXT = "Footer placeholder — add helpful links soon.";
 
-  const params = new URLSearchParams(window.location.search);
-  const batchParam = params.get("batch");
-  const runParam = params.get("run");
-
   const LIST_LIMIT = 50;
   const EVENTS_LIMIT = 10000;
   const SCROLL_FOLLOW_THRESHOLD_PX = 24;
@@ -274,6 +270,73 @@
   let navMenuOpen = false;
   let navMenuHandlers = { outsideClick: null, keydown: null, resize: null };
   let manualActiveElement = null;
+  const DEFAULT_BASE_URL = "http://localhost";
+
+  function normalizePathname(rawPathname) {
+    if (!rawPathname) return "/";
+    return rawPathname.startsWith("/") ? rawPathname : `/${rawPathname}`;
+  }
+
+  function getQueryParams(rawSearch) {
+    const search =
+      rawSearch !== undefined
+        ? rawSearch
+        : (window && window.location && window.location.search) || "";
+    const params = new URLSearchParams(search || "");
+    return {
+      batch: params.get("batch"),
+      run: params.get("run"),
+    };
+  }
+
+  function buildNavHref(route) {
+    const locationObj = (typeof window !== "undefined" && window.location) || {};
+    const pathname = normalizePathname(locationObj.pathname || "");
+    const origin =
+      locationObj.origin ||
+      (locationObj.protocol && locationObj.host
+        ? `${locationObj.protocol}//${locationObj.host}`
+        : "");
+    const base = `${origin || ""}${pathname}`;
+    const routePart = route ? `#/${route}` : "#/";
+    return `${base || ""}${routePart}`;
+  }
+
+  function dispatchHashChange() {
+    if (typeof window?.dispatchEvent === "function" && typeof Event === "function") {
+      window.dispatchEvent(new Event("hashchange"));
+    } else if (typeof window?.dispatch === "function") {
+      window.dispatch("hashchange");
+    }
+  }
+
+  function navigateToRoute(route) {
+    const targetHref = buildNavHref(route);
+    if (window?.history?.replaceState) {
+      window.history.replaceState(null, "", targetHref);
+    } else if (window?.location) {
+      window.location.href = targetHref;
+    }
+    if (window?.location) {
+      try {
+        const parsed = new URL(targetHref, window.location.href || DEFAULT_BASE_URL);
+        window.location.hash = parsed.hash || "";
+        window.location.search = parsed.search || "";
+        if (parsed.pathname) {
+          window.location.pathname = parsed.pathname;
+        }
+        if (!window?.history?.replaceState) {
+          window.location.href = parsed.href;
+        }
+      } catch (_) {
+        // noop for environments without URL support
+      }
+    }
+    dispatchHashChange();
+    if (!window?.__NAV_SKIP_ROUTE__ && typeof routeApp === "function") {
+      routeApp();
+    }
+  }
 
   function elementContains(parent, node) {
     if (!parent || !node) return false;
@@ -458,9 +521,15 @@
     navEl.className = "nav-stack nav-list";
     NAV_ITEMS.forEach((item) => {
       const link = document.createElement("a");
-      link.href = item.href;
+      link.href = buildNavHref(item.route === "batches" ? "" : item.route);
       link.textContent = item.label;
       link.className = "button-link nav-link";
+      link.addEventListener("click", (evt) => {
+        if (typeof evt?.preventDefault === "function") {
+          evt.preventDefault();
+        }
+        navigateToRoute(item.route === "batches" ? "" : item.route);
+      });
       if (item.route === activeRoute) {
         link.setAttribute("aria-current", "page");
       }
@@ -2686,6 +2755,13 @@
       getNavLinks,
       isNavMenuOpen: () => navMenuOpen,
     };
+    module.exports.NavRouting = {
+      buildNavHref,
+      navigateToRoute,
+      getQueryParams,
+      getRouteFromHash,
+      routeApp,
+    };
     module.exports.Footer = {
       setFooterContent,
       DEFAULT_FOOTER_TEXT,
@@ -2705,6 +2781,7 @@
   }
 
   function routeApp() {
+    const { batch: batchParam, run: runParam } = getQueryParams();
     const route = getRouteFromHash();
     if (runParam) {
       renderNav("batches");
@@ -2735,7 +2812,6 @@
   }
 
   function handleHashChange() {
-    if (runParam || batchParam) return;
     routeApp();
   }
 
