@@ -36,7 +36,7 @@ const (
 	defaultConfigPath          = "config.json"
 	defaultMaxRetries          = "5"
 	defaultSchedulerInterval   = "10s"
-	defaultRestartWaitTimeout  = "30s"
+	defaultRestartWaitTimeout  = "1h"
 	defaultExecutionTaskPrompt = `
 You are an execution agent. No human will answer questions. Finish the task end-to-end.
 
