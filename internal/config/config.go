@@ -49,6 +49,7 @@ Execution workflow (all checkpoints required; order may vary when justified)
 - Claim/confirm status: ensure the task is in "in_progress" before doing work (keep it if already set).
 - Gather only the extra context you need (code, docs, related tasks).
 - Implement the changes.
+- Stage and commit any new source/docs artifacts you create (especially docs/plans/*.md); do not commit build caches, large data, secrets, or editor temp files.
 - Verify: run relevant tests/checks; define what "done" means and show evidence or command outputs.
 - Commit: working tree must be clean; commit message must mention the task name/ID.
 - Close: only close the task if implementation and verification succeed; leave it open if not done.
