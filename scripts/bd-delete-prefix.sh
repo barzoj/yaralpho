@@ -22,8 +22,11 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+# Support both bd JSON formats: {items: [...]} and bare arrays.
 mapfile -t IDS < <(bd list --all --json --limit 0 \
-  | jq -r --arg p "$PREFIX" '.items[] | select(.id | startswith($p)) | .id')
+  | jq -r --arg p "$PREFIX" '
+      (.items // .)[] | select(.id | startswith($p)) | .id
+    ')
 
 if [[ ${#IDS[@]} -eq 0 ]]; then
   echo "No issues found with prefix \"$PREFIX\"."
