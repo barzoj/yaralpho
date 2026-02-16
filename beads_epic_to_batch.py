@@ -53,6 +53,25 @@ def parse_bd_json(stdout: str) -> object:
     raise ValueError(f"bd --json output was not parseable:\n{stdout[:500]}")
 
 
+def sort_tasks_ascending(tasks: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    """
+    Sort tasks by trailing numeric suffix (after last '.'); fallback to original order.
+    Ensures rr9.1, rr9.2, ... ordering when IDs follow that pattern.
+    """
+    indexed = list(enumerate(tasks))
+
+    def sort_key(item: Tuple[int, Tuple[str, str]]) -> Tuple[int, int]:
+        idx, (tid, _) = item
+        try:
+            suffix = tid.rsplit(".", 1)[1]
+            return (int(suffix), idx)
+        except (IndexError, ValueError):
+            return (10**9, idx)  # unparsable IDs keep original relative order after numbered ones
+
+    indexed.sort(key=sort_key)
+    return [pair for _, pair in indexed]
+
+
 def get_epic_title(epic_id: str, *, cwd: str | None) -> str:
     rc, out, err = run_bd(["show", epic_id, "--json"], cwd=cwd)
     if rc != 0:
@@ -142,6 +161,7 @@ def main() -> int:
 
     epic_title = get_epic_title(args.epic, cwd=args.cwd)
     tasks = list_child_tasks(args.epic, cwd=args.cwd, limit=args.limit)
+    tasks = sort_tasks_ascending(tasks)
     if not tasks:
         raise SystemExit(f"No child tasks found under epic {args.epic}")
 
