@@ -315,6 +315,11 @@ func (a *App) runScheduler(ctx context.Context) {
 	defer a.logger.Info("scheduler loop stopped")
 
 	for {
+		if a.scheduler.Draining() && a.scheduler.ActiveCount() == 0 {
+			a.logger.Info("scheduler drained; requesting shutdown")
+			a.requestShutdown()
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
