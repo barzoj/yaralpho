@@ -71,9 +71,16 @@ def get_epic_title(epic_id: str, *, cwd: str | None) -> str:
     return title or epic_id
 
 
-def list_child_tasks(epic_id: str, *, cwd: str | None) -> List[Tuple[str, str]]:
+def list_child_tasks(epic_id: str, *, cwd: str | None, limit: int) -> List[Tuple[str, str]]:
     """Return list of (id, title) child tasks for the epic."""
-    rc, out, err = run_bd(["list", "--parent", epic_id, "--json"], cwd=cwd)
+    rc, out, err = run_bd([
+        "list",
+        "--parent",
+        epic_id,
+        "--json",
+        "--limit",
+        str(limit),
+    ], cwd=cwd)
     if rc != 0:
         raise RuntimeError(f"bd list --parent {epic_id} failed (rc={rc}): {err or out}")
     data = parse_bd_json(out)
@@ -121,6 +128,12 @@ def main() -> int:
         help="API base URL (default: http://localhost:8080)",
     )
     ap.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Max child tasks to fetch (bd list --limit); default 1000",
+    )
+    ap.add_argument(
         "--cwd",
         default=None,
         help="Directory where bd is initialized (defaults to current working directory)",
@@ -128,7 +141,7 @@ def main() -> int:
     args = ap.parse_args()
 
     epic_title = get_epic_title(args.epic, cwd=args.cwd)
-    tasks = list_child_tasks(args.epic, cwd=args.cwd)
+    tasks = list_child_tasks(args.epic, cwd=args.cwd, limit=args.limit)
     if not tasks:
         raise SystemExit(f"No child tasks found under epic {args.epic}")
 
