@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -350,13 +351,49 @@ func (f *fakeNotifier) NotifyError(ctx context.Context, batchID, runID, taskRef 
 	return nil
 }
 
-// fakeCopilot returns canned session IDs and closes immediately.
-type fakeCopilot struct{}
+// Events returns a snapshot of recorded notification events.
+func (f *fakeNotifier) Events() []notify.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]notify.Event, len(f.events))
+	copy(out, f.events)
+	return out
+}
 
-func (fakeCopilot) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan copilot.RawEvent, func(), error) {
-	ch := make(chan copilot.RawEvent)
+// fakeCopilot returns canned sessions with optional events for deterministic runs.
+type fakeCopilot struct {
+	mu       sync.Mutex
+	sessions []fakeSession
+	defaultID string
+}
+
+type fakeSession struct {
+	id     string
+	events []copilot.RawEvent
+}
+
+func (f *fakeCopilot) StartSession(ctx context.Context, prompt, repoPath string) (string, <-chan copilot.RawEvent, func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	sid := f.defaultID
+	var events []copilot.RawEvent
+	if len(f.sessions) > 0 {
+		sid = f.sessions[0].id
+		events = f.sessions[0].events
+		f.sessions = f.sessions[1:]
+	}
+	if strings.TrimSpace(sid) == "" {
+		sid = "session"
+	}
+
+	ch := make(chan copilot.RawEvent, len(events))
+	for _, evt := range events {
+		ch <- evt
+	}
 	close(ch)
-	return "session-1", ch, func() {}, nil
+
+	return sid, ch, func() {}, nil
 }
 
 // fakeWorker implements scheduler.Worker with controllable outcomes.

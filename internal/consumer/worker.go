@@ -154,6 +154,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, rep
 			if w.shouldRetry(ctx, batch, repoPath, item.BatchID, item.TaskRef, agentResp, assistantOutput, attempts, retries, hasRetries) {
 				continue
 			}
+			return fmt.Errorf("verification failed: %s", formatAgentResponseText(agentResp, output))
 		}
 
 		if verifyStatus == storage.TaskRunStatusSucceeded {

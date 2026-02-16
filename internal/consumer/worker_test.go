@@ -286,6 +286,66 @@ func TestWorker_RunStartsSecondAfterFirstCompletes(t *testing.T) {
 	}
 }
 
+func TestWorker_FailedVerificationStopsAfterMaxRetries(t *testing.T) {
+	ctx := context.Background()
+
+	st := newFakeStorage()
+	st.batches["b1"] = storage.Batch{
+		ID:           "b1",
+		RepositoryID: "repo-1",
+		Status:       storage.BatchStatusPending,
+		Items:        []storage.BatchItem{{Input: "task-1", Status: storage.ItemStatusPending}},
+	}
+
+	failureEvent := copilot.RawEvent{
+		"type": "assistant.message",
+		"data": map[string]any{"content": `{"status":"failure","reason":"task_not_closed","details":"status in_progress"}`},
+	}
+
+	firstVerify := make(chan copilot.RawEvent, 1)
+	firstVerify <- failureEvent
+	close(firstVerify)
+
+	secondVerify := make(chan copilot.RawEvent, 1)
+	secondVerify <- failureEvent
+	close(secondVerify)
+
+	cp := &fakeCopilot{
+		eventQueue: []chan copilot.RawEvent{
+			closedChan(), // exec attempt 1
+			firstVerify,  // verify attempt 1 (fails)
+			closedChan(), // exec attempt 2
+			secondVerify, // verify attempt 2 (fails, hits max)
+		},
+		sessionIDs: []string{"exec-1", "verify-1", "exec-2", "verify-2"},
+	}
+
+	tr := &fakeTracker{titles: map[string]string{"task-1": "Task One"}}
+	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+		config.MaxRetriesKey:             "2",
+	}
+
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
+	w.now = func() time.Time { return time.Date(2026, 2, 16, 12, 0, 0, 0, time.UTC) }
+
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-1", Runtime: "codex"})
+	require.Error(t, err, "expected worker to fail after max retries")
+
+	batch := st.batches["b1"]
+	require.Equal(t, storage.BatchStatusFailed, batch.Status, "batch should be failed after max retries")
+
+	require.NotEmpty(t, nt.events, "expected notification events recorded")
+	lastEvent := nt.events[len(nt.events)-1]
+	require.Equal(t, "verification_failed_max_retries", lastEvent.Type, "should emit max retry failure")
+
+	for _, ev := range nt.events {
+		require.NotEqual(t, "verification_succeeded", ev.Type, "must not succeed after retry exhaustion")
+	}
+}
+
 func TestExecuteTask_Success(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()

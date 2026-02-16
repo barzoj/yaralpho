@@ -1400,6 +1400,7 @@
           ["Batch ID", "Tasks", "Status", "Actions"],
           rows
         );
+        applyControlTableLayout(table);
         table.className = [table.className, "control-table"]
           .filter(Boolean)
           .join(" ")
@@ -1442,6 +1443,18 @@
     });
     table.appendChild(tbody);
     return table;
+  }
+
+  function applyControlTableLayout(table) {
+    if (!table) return;
+    const colgroup = document.createElement("colgroup");
+    ["32%", "28%", "14%", "26%"].forEach((width) => {
+      const col = document.createElement("col");
+      col.style.width = width;
+      colgroup.appendChild(col);
+    });
+    table.insertBefore(colgroup, table.firstChild);
+    table.classList.add("control-table-fixed");
   }
 
   function renderVersionBody(data) {

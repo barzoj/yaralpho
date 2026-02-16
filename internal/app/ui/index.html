@@ -77,7 +77,7 @@
     }
     .control-plane {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      grid-template-columns: 1fr;
       gap: 12px;
     }
     .control-card {
@@ -102,6 +102,9 @@
     }
     .control-table {
       min-width: 520px;
+    }
+    .control-table.control-table-fixed {
+      table-layout: fixed;
     }
     .control-table th,
     .control-table td {
