@@ -119,7 +119,7 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 
 	restartWait, err := cfg.Get(RestartWaitTimeoutKey)
 	require.NoError(t, err)
-	require.Equal(t, "1h", restartWait)
+	require.Equal(t, "20m", restartWait)
 
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)

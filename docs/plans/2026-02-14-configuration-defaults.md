@@ -12,7 +12,7 @@ After _human approval_, use plan2beads to convert this plan to a beads epic, the
 
 - **Env-first configuration with JSON fallback**: Reuse current loader to avoid duplicating config parsing logic while honoring environment precedence.
 - **Duration parsing at the edge**: Parse interval/timeout strings when wiring components rather than embedding parsing into the config map, keeping `config.Config` interface stable.
-- **Conservative defaults**: 10s scheduler interval and 1h restart wait timeout to balance responsiveness with load and CI wait behavior; retain existing default maxRetries=5.
+- **Conservative defaults**: 10s scheduler interval and 20m restart wait timeout to balance responsiveness with load and CI wait behavior; retain existing default maxRetries=5.
 
 ---
 
@@ -39,7 +39,7 @@ After _human approval_, use plan2beads to convert this plan to a beads epic, the
 - Current config defaults and env precedence in `internal/config/config.go`
 - Existing tests for defaults in `internal/config/config_test.go`
 
-**Outcome:** Config loader recognizes the new keys, applies defaults (10s interval, 1h wait timeout, 5 maxRetries), and tests cover env override and fallback behavior.
+**Outcome:** Config loader recognizes the new keys, applies defaults (10s interval, 20m wait timeout, 5 maxRetries), and tests cover env override and fallback behavior.
 
 **How to Verify:**  
 Run: `go test ./internal/config -run TestEnvOverridesAndTokenPrecedence|TestOptionalSlackNotRequired`  
@@ -69,7 +69,7 @@ Expected: Tests pass with assertions for new keys and defaults.
 - Restart handler behavior in `internal/app/restart_handler.go`
 - Scheduler fake tests in `internal/app/restart_handler_test.go`
 
-**Outcome:** `wait=true` requests use a timeout derived from config (default 1h) when waiting for draining; timeouts return 408 with clear messaging.
+**Outcome:** `wait=true` requests use a timeout derived from config (default 20m) when waiting for draining; timeouts return 408 with clear messaging.
 
 **How to Verify:**  
 Run: `go test ./internal/app -run TestRestartHandler`  
