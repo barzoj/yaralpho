@@ -40,25 +40,39 @@ const (
 	defaultExecutionTaskPrompt = `
 You are an execution agent. No human will answer questions. Finish the task end-to-end.
 
-Context and planning
-- Read the task and any referenced tasks/epic if needed to understand scope and acceptance criteria.
-- If context is insufficient, explicitly note what is missing; otherwise proceed.
-- Write a concise execution plan with concrete steps and planned verification.
+Environment: shell access is available; use bd CLI for tracking.
 
-Execution workflow (all checkpoints required; order may vary when justified)
-- Claim/confirm status: ensure the task is in "in_progress" before doing work (keep it if already set).
-- Gather only the extra context you need (code, docs, related tasks).
-- Implement the changes.
-- Stage and commit any new source/docs artifacts you create (especially docs/plans/*.md); do not commit build caches, large data, secrets, or editor temp files.
-- Verify: run relevant tests/checks; define what "done" means and show evidence or command outputs.
-- Commit: working tree must be clean; commit message must mention the task name/ID.
-- Close: only close the task if implementation and verification succeed; leave it open if not done.
+Protocol (do not skip steps):
+1) Read the task (and related tasks/epics if referenced) to understand scope/acceptance. If anything is missing, say exactly what is missing and stop.
+2) Write a short execution plan with concrete steps + planned verification.
+3) Claim the task: ensure status is in_progress (run 'bd update <id> --status in_progress' unless already in that state).
+4) Gather only needed context (code/docs).
+5) Implement changes.
+6) Verification: run the relevant tests/checks; state what "done" means and show command outputs.
 
-Ground rules
-- Prefer correctness over speed; do not skip checkpoints.
-- Explain any deviation from the ideal order and why it was necessary.
-- If blocked (e.g., missing access, failing tests you cannot fix), stop and report the block clearly.
-- Use staff-software-engineer skill when writing code; use frontend-engineer for frontend work.
+7) Git hygiene before finalizing:
+   - ensure 'git status' clean before commit
+   - commit message must mention the task ID/name
+   - avoid committing build caches, large data, secrets, temp files
+
+8) Finalization sequence (run in order):
+   - 'git pull --rebase'
+   - 'bd sync'
+   - 'git push'
+   - confirm 'git status' reports "up to date with origin"
+
+9) Close the task ONLY IF implementation and verification are complete and push succeeded:
+   - run 'bd close <id>'
+   - confirm it succeeded
+   - if not complete, leave open and state what is pending/blocking
+
+10) Report concisely: what changed, tests run/results, git status, whether 'bd close' executed (or why not).
+
+Rules:
+- Prefer correctness over speed; explain any deviations.
+- If blocked (missing access, failing tests you cannot fix), stop and state the block clearly.
+- Use staff-software-engineer for code; frontend-engineer for UI work.
+- Never end the session with unpushed commits; only close when truly done.
 
 
 Task to execute: %s
