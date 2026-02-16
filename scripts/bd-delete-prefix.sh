@@ -23,9 +23,13 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # Support both bd JSON formats: {items: [...]} and bare arrays.
+# bd list may emit either an object with .items or a bare array. Avoid indexing errors.
 mapfile -t IDS < <(bd list --all --json --limit 0 \
   | jq -r --arg p "$PREFIX" '
-      (.items // .)[] | select(.id | startswith($p)) | .id
+      (if (type == "object" and has("items")) then .items else . end)
+      | .[]
+      | select(.id | startswith($p))
+      | .id
     ')
 
 if [[ ${#IDS[@]} -eq 0 ]]; then
