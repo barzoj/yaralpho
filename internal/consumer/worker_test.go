@@ -648,6 +648,44 @@ func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.
 	require.Len(t, nt.errors, 1)
 }
 
+func TestExecuteTask_Timeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	st := newFakeStorage()
+	batch := storage.Batch{ID: "b-timeout", Status: storage.BatchStatusPending}
+	st.batches["b-timeout"] = batch
+
+	events := make(chan copilot.RawEvent)
+	cp := &fakeCopilot{events: events, sessionID: "s-timeout"}
+	nt := &fakeNotifier{}
+
+	now := time.Date(2026, 2, 9, 10, 0, 0, 0, time.UTC)
+	status, err := executeTask(
+		ctx,
+		cp,
+		st,
+		nil,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-timeout" },
+		func() time.Time { return now },
+		&batch,
+		"task-timeout",
+		"prompt",
+	)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, storage.TaskRunStatusTimedOut, status)
+
+	run := st.runs["run-timeout"]
+	require.Equal(t, storage.TaskRunStatusTimedOut, run.Status)
+	require.Equal(t, &now, run.FinishedAt)
+	require.True(t, cp.stopped)
+	require.Equal(t, 1, cp.stopCalls)
+}
+
 func TestSetBatchStatus(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()
@@ -747,8 +785,8 @@ func newFakeStorage() *fakeStorage {
 		repositories: map[string]storage.Repository{
 			"repo-1": {ID: "repo-1", Path: "/repo"},
 		},
-		batches:      make(map[string]storage.Batch),
-		runs:         make(map[string]storage.TaskRun),
+		batches: make(map[string]storage.Batch),
+		runs:    make(map[string]storage.TaskRun),
 	}
 }
 

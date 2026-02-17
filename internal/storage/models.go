@@ -41,6 +41,8 @@ const (
 	TaskRunStatusSucceeded TaskRunStatus = "succeeded"
 	TaskRunStatusFailed    TaskRunStatus = "failed"
 	TaskRunStatusStopped   TaskRunStatus = "stopped"
+	// TaskRunStatusTimedOut marks a run that hit its execution deadline.
+	TaskRunStatusTimedOut TaskRunStatus = "timed_out"
 )
 
 // Repository represents a source code repository whose batches and runs are scoped together.

@@ -168,11 +168,22 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, rep
 }
 
 func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, repoPath, taskRef, execInstruction, verifyInstruction string, cp copilot.Client) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
+	execCtx := ctx
+	cancel := func() {}
+	if value, err := w.cfg.Get(config.TaskExecTimeoutKey); err != nil {
+		w.logger.Warn("get execution timeout", zap.Error(err))
+	} else if duration, parseErr := time.ParseDuration(strings.TrimSpace(value)); parseErr != nil {
+		w.logger.Warn("invalid execution timeout; using parent context", zap.String("value", value), zap.Error(parseErr))
+	} else if duration > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, duration)
+	}
+	defer cancel()
+
 	execTask := NewExecutionTask(w.cfg, w.tracker, cp, w.storage, w.notifier, w.logger, repoPath, execInstruction)
 	execTask.newRunID = w.newRunID
 	execTask.now = w.now
 
-	status, assistantOutput, finalErr := execTask.Execute(ctx, batch, taskRef)
+	status, assistantOutput, finalErr := execTask.Execute(execCtx, batch, taskRef)
 	if status != storage.TaskRunStatusSucceeded {
 		return status, AgentStructuredResponse{}, assistantOutput, "", finalErr
 	}

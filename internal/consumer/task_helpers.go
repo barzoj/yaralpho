@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -103,8 +104,12 @@ eventLoop:
 	for {
 		select {
 		case <-ctx.Done():
-			status = storage.TaskRunStatusStopped
 			finalErr = ctx.Err()
+			if errors.Is(finalErr, context.DeadlineExceeded) {
+				status = storage.TaskRunStatusTimedOut
+			} else {
+				status = storage.TaskRunStatusStopped
+			}
 			break eventLoop
 		case evt, ok := <-events:
 			if !ok {
