@@ -346,6 +346,51 @@ func TestWorker_FailedVerificationStopsAfterMaxRetries(t *testing.T) {
 	}
 }
 
+func TestWorker_VerificationTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	st := newFakeStorage()
+	st.batches["b1"] = storage.Batch{
+		ID:           "b1",
+		RepositoryID: "repo-1",
+		Status:       storage.BatchStatusPending,
+	}
+
+	execEvents := closedChan()
+	verifyEvents := make(chan copilot.RawEvent)
+	cp := &fakeCopilot{
+		eventQueue: []chan copilot.RawEvent{execEvents, verifyEvents},
+		sessionIDs: []string{"exec-timeout", "verify-timeout"},
+	}
+
+	tr := &fakeTracker{titles: map[string]string{"task-timeout": "Timeout Task"}}
+	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+		config.TaskVerifyTimeoutKey:      "5ms",
+	}
+
+	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
+	nextRun := 0
+	w.newRunID = func() string {
+		nextRun++
+		return fmt.Sprintf("run-timeout-%d", nextRun)
+	}
+	w.now = func() time.Time { return time.Date(2026, 2, 17, 12, 0, 0, 0, time.UTC) }
+
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-timeout", Runtime: "codex"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	verifyRun := st.runs["run-timeout-2"]
+	require.Equal(t, storage.TaskRunStatusTimedOut, verifyRun.Status)
+	require.Equal(t, "verify-timeout", verifyRun.SessionID)
+	require.True(t, cp.stopped)
+	require.Equal(t, 2, cp.stopCalls, "both execution and verification sessions should be stopped")
+	require.Equal(t, storage.BatchStatusFailed, st.batches["b1"].Status)
+}
+
 func TestExecuteTask_Success(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()

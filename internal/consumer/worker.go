@@ -188,8 +188,19 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, rep
 		return status, AgentStructuredResponse{}, assistantOutput, "", finalErr
 	}
 
+	verifyCtx := ctx
+	verifyCancel := func() {}
+	if value, err := w.cfg.Get(config.TaskVerifyTimeoutKey); err != nil {
+		w.logger.Warn("get verification timeout", zap.Error(err))
+	} else if duration, parseErr := time.ParseDuration(strings.TrimSpace(value)); parseErr != nil {
+		w.logger.Warn("invalid verification timeout; using parent context", zap.String("value", value), zap.Error(parseErr))
+	} else if duration > 0 {
+		verifyCtx, verifyCancel = context.WithTimeout(ctx, duration)
+	}
+	defer verifyCancel()
+
 	verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
-	verifyStatus, output, verifyErr := verifyTask.Execute(ctx, batch, taskRef)
+	verifyStatus, output, verifyErr := verifyTask.Execute(verifyCtx, batch, taskRef)
 	if verifyErr != nil {
 		w.logger.Warn("verification task execution error", zap.Error(verifyErr), zap.String("task_ref", taskRef))
 		return verifyStatus, AgentStructuredResponse{}, assistantOutput, output, verifyErr
