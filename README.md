@@ -74,6 +74,10 @@ The config loader is environment-first with an optional JSON fallback:
 | `YARALPHO_VERIFICATION_TASK_PROMPT` | no        | built-in      | Prompt template for verification agents.                                  |
 | `RALPH_CONFIG`                      | no        | `config.json` | Path to JSON config file (env still wins).                                |
 
+Timeout defaults and behavior:
+- Execution and verification phases default to `20m` (`YARALPHO_TASK_EXEC_TIMEOUT`, `YARALPHO_TASK_VERIFY_TIMEOUT`). Override them with env vars or the JSON fallback; env always wins.
+- When a phase hits its timeout, the worker stops the Copilot session, marks the TaskRun timed out, and returns a timeout error. The scheduler treats it like any other failure: attempts increment, the agent returns to `idle`, and the item leaves `in_progress` for retry until `YARALPHO_MAX_RETRIES` is exhausted.
+
 GitHub Copilot still requires an access token, but the SDK reads it directly from `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_TOKEN`) without going through the config loader.
 
 ### JSON example (fallback file)
@@ -85,7 +89,11 @@ GitHub Copilot still requires an access token, but the SDK reads it directly fro
 	"YARALPHO_REPO_PATH": "/abs/path/to/repo",
 	"YARALPHO_PORT": "8080",
 	"YARALPHO_SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T000/B000/REDACTED",
-	"YARALPHO_MAX_RETRIES": "5"
+	"YARALPHO_MAX_RETRIES": "5",
+	"YARALPHO_SCHEDULER_INTERVAL": "10s",
+	"YARALPHO_RESTART_WAIT_TIMEOUT": "20m",
+	"YARALPHO_TASK_EXEC_TIMEOUT": "20m",
+	"YARALPHO_TASK_VERIFY_TIMEOUT": "20m"
 }
 ```
 
@@ -189,6 +197,6 @@ curl -s -X POST "http://localhost:8080/restart?wait=true"
 - **Batch:** `pending` → `in_progress` → (`done` | `failed`) with optional `paused` (skip scheduling) and manual `/restart` for failed batches.
 - **Item:** `pending` → `in_progress` → (`done` | `failed`); `attempts` increments on retry.
 - **Agent:** `idle` ↔ `busy`; updates/deletes are blocked when `busy`.
-- **Run:** `running` → (`succeeded` | `failed` | `stopped`).
+- **Run:** `running` → (`succeeded` | `failed` | `timed_out` | `stopped`).
 
 These statuses are persisted in Mongo and surfaced verbatim through the API responses.
