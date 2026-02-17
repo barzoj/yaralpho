@@ -29,6 +29,8 @@ const (
 	RestartWaitTimeoutKey     = "YARALPHO_RESTART_WAIT_TIMEOUT"
 	ExecutionTaskPromptKey    = "YARALPHO_EXECUTION_TASK_PROMPT"
 	VerificationTaskPromptKey = "YARALPHO_VERIFICATION_TASK_PROMPT"
+	TaskExecTimeoutKey        = "YARALPHO_TASK_EXEC_TIMEOUT"
+	TaskVerifyTimeoutKey      = "YARALPHO_TASK_VERIFY_TIMEOUT"
 	ConfigPathOverride        = "RALPH_CONFIG"
 )
 
@@ -37,6 +39,8 @@ const (
 	defaultMaxRetries          = "5"
 	defaultSchedulerInterval   = "10s"
 	defaultRestartWaitTimeout  = "20m"
+	defaultTaskExecTimeout     = "20m"
+	defaultTaskVerifyTimeout   = "20m"
 	defaultExecutionTaskPrompt = `
 You are an execution agent. No human will answer questions. Finish the task end-to-end.
 
@@ -145,6 +149,8 @@ var envOverrideKeys = []string{
 	RestartWaitTimeoutKey,
 	ExecutionTaskPromptKey,
 	VerificationTaskPromptKey,
+	TaskExecTimeoutKey,
+	TaskVerifyTimeoutKey,
 }
 
 var secretKeys = map[string]struct{}{
@@ -164,6 +170,8 @@ func LoggableKeys() []string {
 		RestartWaitTimeoutKey,
 		ExecutionTaskPromptKey,
 		VerificationTaskPromptKey,
+		TaskExecTimeoutKey,
+		TaskVerifyTimeoutKey,
 	}
 }
 
@@ -223,6 +231,12 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 	}
 	if strings.TrimSpace(values[RestartWaitTimeoutKey]) == "" {
 		values[RestartWaitTimeoutKey] = defaultRestartWaitTimeout
+	}
+	if strings.TrimSpace(values[TaskExecTimeoutKey]) == "" {
+		values[TaskExecTimeoutKey] = defaultTaskExecTimeout
+	}
+	if strings.TrimSpace(values[TaskVerifyTimeoutKey]) == "" {
+		values[TaskVerifyTimeoutKey] = defaultTaskVerifyTimeout
 	}
 	if strings.TrimSpace(values[ExecutionTaskPromptKey]) == "" {
 		values[ExecutionTaskPromptKey] = defaultExecutionTaskPrompt

@@ -56,5 +56,7 @@ The `paused` status skips scheduling new work while allowing in-flight items to 
 - `YARALPHO_SCHEDULER_INTERVAL` (default `10s`) – tick cadence.
 - `YARALPHO_MAX_RETRIES` (default `5`) – attempts per batch item before marking batch failed.
 - `YARALPHO_RESTART_WAIT_TIMEOUT` (default `20m`) – max block time for `/restart?wait=true`.
+- `YARALPHO_TASK_EXEC_TIMEOUT` (default `20m`) – max duration allowed for the execution phase of a task run.
+- `YARALPHO_TASK_VERIFY_TIMEOUT` (default `20m`) – max duration allowed for the verification phase of a task run.
 
 _Notable removals_: the legacy `/add` queue entrypoint and global `/runs` list have been removed; work is now repository-scoped and sequential per batch. Epics are gone; runs carry `parent_ref` only when the tracker reports one, without special APIs.

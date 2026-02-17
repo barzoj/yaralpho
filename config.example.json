@@ -3,6 +3,8 @@
   "YARALPHO_MONGODB_DB": "ralph",
   "YARALPHO_REPO_PATH": "/abs/path/to/repo",
   "YARALPHO_PORT": "8080",
+  "YARALPHO_TASK_EXEC_TIMEOUT": "20m",
+  "YARALPHO_TASK_VERIFY_TIMEOUT": "20m",
   "YARALPHO_MAX_RETRIES": "5",
   "YARALPHO_EXECUTION_TASK_PROMPT": "Custom execution task prompt (optional)",
   "YARALPHO_VERIFICATION_TASK_PROMPT": "Custom verification task prompt (optional)",

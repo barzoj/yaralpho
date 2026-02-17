@@ -24,6 +24,8 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
         "YARALPHO_MAX_RETRIES": "3",
         "YARALPHO_SCHEDULER_INTERVAL": "99s",
         "YARALPHO_RESTART_WAIT_TIMEOUT": "45s",
+        "YARALPHO_TASK_EXEC_TIMEOUT": "30m",
+        "YARALPHO_TASK_VERIFY_TIMEOUT": "25m",
         "YARALPHO_EXECUTION_TASK_PROMPT": "json execution",
         "YARALPHO_VERIFICATION_TASK_PROMPT": "json verification"
     }`)
@@ -36,6 +38,8 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	t.Setenv(MaxRetriesKey, "7")
 	t.Setenv(SchedulerIntervalKey, "15s")
 	t.Setenv(RestartWaitTimeoutKey, "20s")
+	t.Setenv(TaskExecTimeoutKey, "18m")
+	t.Setenv(TaskVerifyTimeoutKey, "17m")
 	t.Setenv(ExecutionTaskPromptKey, "env execution prompt")
 	t.Setenv(VerificationTaskPromptKey, "env verification prompt")
 
@@ -66,6 +70,14 @@ func TestEnvOverridesAndTokenPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "20s", restartWait)
 
+	execTimeout, err := cfg.Get(TaskExecTimeoutKey)
+	require.NoError(t, err)
+	require.Equal(t, "18m", execTimeout)
+
+	verifyTimeout, err := cfg.Get(TaskVerifyTimeoutKey)
+	require.NoError(t, err)
+	require.Equal(t, "17m", verifyTimeout)
+
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)
 	require.Equal(t, "env execution prompt", execPrompt)
@@ -92,6 +104,8 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	t.Setenv(MaxRetriesKey, "")
 	t.Setenv(SchedulerIntervalKey, "")
 	t.Setenv(RestartWaitTimeoutKey, "")
+	t.Setenv(TaskExecTimeoutKey, "")
+	t.Setenv(TaskVerifyTimeoutKey, "")
 	t.Setenv(ExecutionTaskPromptKey, "")
 	t.Setenv(VerificationTaskPromptKey, "")
 
@@ -120,6 +134,14 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 	restartWait, err := cfg.Get(RestartWaitTimeoutKey)
 	require.NoError(t, err)
 	require.Equal(t, "20m", restartWait)
+
+	execTimeout, err := cfg.Get(TaskExecTimeoutKey)
+	require.NoError(t, err)
+	require.Equal(t, "20m", execTimeout)
+
+	verifyTimeout, err := cfg.Get(TaskVerifyTimeoutKey)
+	require.NoError(t, err)
+	require.Equal(t, "20m", verifyTimeout)
 
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)

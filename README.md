@@ -68,6 +68,8 @@ The config loader is environment-first with an optional JSON fallback:
 | `YARALPHO_MAX_RETRIES`              | no        | `5`           | Max attempts per batch item before the batch is marked `failed`.          |
 | `YARALPHO_SCHEDULER_INTERVAL`       | no        | `10s`         | Interval between scheduler ticks that claim the next eligible batch item. |
 | `YARALPHO_RESTART_WAIT_TIMEOUT`     | no        | `20m`         | Maximum time `/restart?wait=true` will block while draining active runs.  |
+| `YARALPHO_TASK_EXEC_TIMEOUT`        | no        | `20m`         | Max execution phase duration per item before timing out.                  |
+| `YARALPHO_TASK_VERIFY_TIMEOUT`      | no        | `20m`         | Max verification phase duration per item before timing out.               |
 | `YARALPHO_EXECUTION_TASK_PROMPT`    | no        | built-in      | Prompt template for execution agents (used by worker).                    |
 | `YARALPHO_VERIFICATION_TASK_PROMPT` | no        | built-in      | Prompt template for verification agents.                                  |
 | `RALPH_CONFIG`                      | no        | `config.json` | Path to JSON config file (env still wins).                                |
