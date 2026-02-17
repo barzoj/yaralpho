@@ -108,6 +108,39 @@ func TestSchedulerTick_LogsRetryExhaustion(t *testing.T) {
 	assertContextField(t, failEntry, "max_retries", 1)
 }
 
+func TestSchedulerTick_TimeoutCleansUp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	st := &cancelAwareStorage{
+		batches: []storage.Batch{{
+			ID:           "batch-timeout",
+			RepositoryID: "repo-timeout",
+			Status:       storage.BatchStatusPending,
+			Items: []storage.BatchItem{{
+				Input:    "task-timeout",
+				Status:   storage.ItemStatusPending,
+				Attempts: 0,
+			}},
+		}},
+		agents: []storage.Agent{{
+			ID:     "agent-timeout",
+			Status: storage.AgentStatusIdle,
+		}},
+	}
+
+	worker := &cancelingWorker{cancel: cancel}
+	s := New(st, worker, zap.NewNop(), Options{MaxRetries: 1})
+
+	err := s.Tick(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	batch := st.batches[0]
+	require.Equal(t, 1, batch.Items[0].Attempts)
+	require.Equal(t, storage.ItemStatusFailed, batch.Items[0].Status)
+	require.Equal(t, storage.BatchStatusFailed, batch.Status)
+	require.Equal(t, storage.AgentStatusIdle, st.agents[0].Status)
+}
+
 func TestSchedulerStopEnablesDraining(t *testing.T) {
 	s := New(nil, nil, zap.NewNop(), Options{})
 	require.False(t, s.Draining())
@@ -195,4 +228,60 @@ type fakeWorker struct {
 
 func (f *fakeWorker) Process(ctx context.Context, item consumer.WorkItem) error {
 	return f.err
+}
+
+type cancelingWorker struct {
+	cancel func()
+}
+
+func (f *cancelingWorker) Process(ctx context.Context, item consumer.WorkItem) error {
+	if f.cancel != nil {
+		f.cancel()
+	}
+	return context.DeadlineExceeded
+}
+
+type cancelAwareStorage struct {
+	batches []storage.Batch
+	agents  []storage.Agent
+}
+
+func (f *cancelAwareStorage) ListBatches(ctx context.Context, limit int64) ([]storage.Batch, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.batches, nil
+}
+
+func (f *cancelAwareStorage) UpdateBatch(ctx context.Context, batch *storage.Batch) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for i := range f.batches {
+		if f.batches[i].ID == batch.ID {
+			f.batches[i] = *batch
+			return nil
+		}
+	}
+	return nil
+}
+
+func (f *cancelAwareStorage) ListAgents(ctx context.Context) ([]storage.Agent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.agents, nil
+}
+
+func (f *cancelAwareStorage) UpdateAgent(ctx context.Context, agent *storage.Agent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for i := range f.agents {
+		if f.agents[i].ID == agent.ID {
+			f.agents[i] = *agent
+			return nil
+		}
+	}
+	return nil
 }

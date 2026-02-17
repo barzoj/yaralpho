@@ -237,10 +237,15 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 			}
 		}
 
-		updateBatchErr := s.store.UpdateBatch(ctx, &batch)
+		completionCtx := ctx
+		if ctx.Err() != nil {
+			completionCtx = context.WithoutCancel(ctx)
+		}
+
+		updateBatchErr := s.store.UpdateBatch(completionCtx, &batch)
 
 		claimedAgent.Status = storage.AgentStatusIdle
-		updateAgentErr := s.store.UpdateAgent(ctx, &claimedAgent)
+		updateAgentErr := s.store.UpdateAgent(completionCtx, &claimedAgent)
 		if updateAgentErr != nil {
 			s.logger.Warn("update agent idle", zap.Error(updateAgentErr), zap.String("agent_id", claimedAgent.ID))
 		}
