@@ -15,6 +15,8 @@ import (
 	"github.com/barzoj/yaralpho/internal/tracker"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestWorker_TaskPromptAndEvents(t *testing.T) {
@@ -371,7 +373,15 @@ func TestWorker_VerificationTimeout(t *testing.T) {
 		config.TaskVerifyTimeoutKey:      "5ms",
 	}
 
-	w := NewWorker(tr, cp, st, nt, cfg, zap.NewNop())
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+
+	originalMetricRecorder := recordTimeoutMetric
+	timeoutMetrics := 0
+	recordTimeoutMetric = func(phase string) { timeoutMetrics++ }
+	defer func() { recordTimeoutMetric = originalMetricRecorder }()
+
+	w := NewWorker(tr, cp, st, nt, cfg, logger)
 	nextRun := 0
 	w.newRunID = func() string {
 		nextRun++
@@ -389,6 +399,15 @@ func TestWorker_VerificationTimeout(t *testing.T) {
 	require.True(t, cp.stopped)
 	require.Equal(t, 2, cp.stopCalls, "both execution and verification sessions should be stopped")
 	require.Equal(t, storage.BatchStatusFailed, st.batches["b1"].Status)
+
+	timeoutEntries := logs.FilterMessage("task phase timed out").All()
+	require.Len(t, timeoutEntries, 1)
+	fields := timeoutEntries[0].ContextMap()
+	require.Equal(t, "verify", fields["phase"])
+	require.Equal(t, "b1", fields["batch_id"])
+	require.Equal(t, "task-timeout", fields["task_ref"])
+	require.Equal(t, 5*time.Millisecond, fields["timeout"])
+	require.Equal(t, 1, timeoutMetrics)
 }
 
 func TestExecuteTask_Success(t *testing.T) {
@@ -694,8 +713,17 @@ func TestExecuteTaskWithStructuredOutput_StartSessionErrorSetsFailed(t *testing.
 }
 
 func TestExecuteTask_Timeout(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+
+	originalMetricRecorder := recordTimeoutMetric
+	timeoutMetrics := 0
+	recordTimeoutMetric = func(phase string) { timeoutMetrics++ }
+	defer func() { recordTimeoutMetric = originalMetricRecorder }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
+	ctx = withTimeoutMetadata(ctx, "execute", 10*time.Millisecond)
 
 	st := newFakeStorage()
 	batch := storage.Batch{ID: "b-timeout", Status: storage.BatchStatusPending}
@@ -712,7 +740,7 @@ func TestExecuteTask_Timeout(t *testing.T) {
 		st,
 		nil,
 		nt,
-		zap.NewNop(),
+		logger,
 		"/repo",
 		func() string { return "run-timeout" },
 		func() time.Time { return now },
@@ -729,6 +757,15 @@ func TestExecuteTask_Timeout(t *testing.T) {
 	require.Equal(t, &now, run.FinishedAt)
 	require.True(t, cp.stopped)
 	require.Equal(t, 1, cp.stopCalls)
+
+	timeoutEntries := logs.FilterMessage("task phase timed out").All()
+	require.Len(t, timeoutEntries, 1)
+	fields := timeoutEntries[0].ContextMap()
+	require.Equal(t, "execute", fields["phase"])
+	require.Equal(t, "b-timeout", fields["batch_id"])
+	require.Equal(t, "task-timeout", fields["task_ref"])
+	require.Equal(t, 10*time.Millisecond, fields["timeout"])
+	require.Equal(t, 1, timeoutMetrics)
 }
 
 func TestSetBatchStatus(t *testing.T) {

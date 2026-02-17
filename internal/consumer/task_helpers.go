@@ -21,6 +21,54 @@ func setSessionEventBus(b bus.Bus) {
 	sessionEventBus = b
 }
 
+type timeoutContextKey string
+
+const (
+	timeoutPhaseKey timeoutContextKey = "timeout_phase"
+	timeoutValueKey timeoutContextKey = "timeout_value"
+)
+
+var recordTimeoutMetric = func(string) {}
+
+func withTimeoutMetadata(ctx context.Context, phase string, timeout time.Duration) context.Context {
+	if phase != "" {
+		ctx = context.WithValue(ctx, timeoutPhaseKey, phase)
+	}
+	ctx = context.WithValue(ctx, timeoutValueKey, timeout)
+	return ctx
+}
+
+func timeoutPhase(ctx context.Context) string {
+	if value, ok := ctx.Value(timeoutPhaseKey).(string); ok && value != "" {
+		return value
+	}
+	return "execute"
+}
+
+func timeoutValue(ctx context.Context) time.Duration {
+	if value, ok := ctx.Value(timeoutValueKey).(time.Duration); ok {
+		return value
+	}
+	return 0
+}
+
+func logTimeoutEvent(ctx context.Context, logger *zap.Logger, batchID, taskRef string, timeout, elapsed time.Duration, err error) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	phase := timeoutPhase(ctx)
+	logger.Warn(
+		"task phase timed out",
+		zap.String("batch_id", batchID),
+		zap.String("task_ref", taskRef),
+		zap.String("phase", phase),
+		zap.Duration("timeout", timeout),
+		zap.Duration("elapsed", elapsed),
+		zap.Error(err),
+	)
+	recordTimeoutMetric(phase)
+}
+
 // SessionEventBus exposes the shared session event bus for consumers such as
 // HTTP handlers. It returns nil if the bus has not been initialized.
 func SessionEventBus() bus.Bus {
@@ -148,6 +196,10 @@ eventLoop:
 	finished := now()
 	run.Status = status
 	run.FinishedAt = &finished
+
+	if status == storage.TaskRunStatusTimedOut {
+		logTimeoutEvent(ctx, logger, batch.ID, run.TaskRef, timeoutValue(ctx), finished.Sub(run.StartedAt), finalErr)
+	}
 
 	if err := st.UpdateTaskRun(ctx, &run); err != nil {
 		logger.Error("update task run", zap.Error(err), zap.String("run_id", run.ID))

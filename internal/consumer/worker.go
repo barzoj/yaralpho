@@ -169,6 +169,7 @@ func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, rep
 
 func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, repoPath, taskRef, execInstruction, verifyInstruction string, cp copilot.Client) (storage.TaskRunStatus, AgentStructuredResponse, string, string, error) {
 	execCtx := ctx
+	execTimeout := time.Duration(0)
 	cancel := func() {}
 	if value, err := w.cfg.Get(config.TaskExecTimeoutKey); err != nil {
 		w.logger.Warn("get execution timeout", zap.Error(err))
@@ -176,7 +177,11 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, rep
 		w.logger.Warn("invalid execution timeout; using parent context", zap.String("value", value), zap.Error(parseErr))
 	} else if duration > 0 {
 		execCtx, cancel = context.WithTimeout(ctx, duration)
+		execTimeout = duration
+	} else {
+		execTimeout = duration
 	}
+	execCtx = withTimeoutMetadata(execCtx, "execute", execTimeout)
 	defer cancel()
 
 	execTask := NewExecutionTask(w.cfg, w.tracker, cp, w.storage, w.notifier, w.logger, repoPath, execInstruction)
@@ -189,6 +194,7 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, rep
 	}
 
 	verifyCtx := ctx
+	verifyTimeout := time.Duration(0)
 	verifyCancel := func() {}
 	if value, err := w.cfg.Get(config.TaskVerifyTimeoutKey); err != nil {
 		w.logger.Warn("get verification timeout", zap.Error(err))
@@ -196,7 +202,11 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, rep
 		w.logger.Warn("invalid verification timeout; using parent context", zap.String("value", value), zap.Error(parseErr))
 	} else if duration > 0 {
 		verifyCtx, verifyCancel = context.WithTimeout(ctx, duration)
+		verifyTimeout = duration
+	} else {
+		verifyTimeout = duration
 	}
+	verifyCtx = withTimeoutMetadata(verifyCtx, "verify", verifyTimeout)
 	defer verifyCancel()
 
 	verifyTask := NewVerificationTask(w.cfg, execTask, verifyInstruction)
