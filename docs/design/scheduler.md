@@ -59,4 +59,9 @@ The `paused` status skips scheduling new work while allowing in-flight items to 
 - `YARALPHO_TASK_EXEC_TIMEOUT` (default `20m`) – max duration allowed for the execution phase of a task run.
 - `YARALPHO_TASK_VERIFY_TIMEOUT` (default `20m`) – max duration allowed for the verification phase of a task run.
 
+### Timeout behavior
+
+- Worker execution and verification phases run under their respective timeouts; on deadline exceeded the worker stops the Copilot session, marks the run timed out, and returns the timeout error.
+- The scheduler handles timeout errors like other failures: it increments `attempts`, releases the agent back to `idle`, and moves the item out of `in_progress` for retry until `YARALPHO_MAX_RETRIES` is reached.
+
 _Notable removals_: the legacy `/add` queue entrypoint and global `/runs` list have been removed; work is now repository-scoped and sequential per batch. Epics are gone; runs carry `parent_ref` only when the tracker reports one, without special APIs.

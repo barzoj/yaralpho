@@ -75,8 +75,8 @@ The config loader is environment-first with an optional JSON fallback:
 | `RALPH_CONFIG`                      | no        | `config.json` | Path to JSON config file (env still wins).                                |
 
 Timeout defaults and behavior:
-- Execution and verification phases default to `20m` (`YARALPHO_TASK_EXEC_TIMEOUT`, `YARALPHO_TASK_VERIFY_TIMEOUT`). Override them with env vars or the JSON fallback; env always wins.
-- When a phase hits its timeout, the worker stops the Copilot session, marks the TaskRun timed out, and returns a timeout error. The scheduler treats it like any other failure: attempts increment, the agent returns to `idle`, and the item leaves `in_progress` for retry until `YARALPHO_MAX_RETRIES` is exhausted.
+- Execution and verification phases default to `20m` (`YARALPHO_TASK_EXEC_TIMEOUT`, `YARALPHO_TASK_VERIFY_TIMEOUT`). Override either by setting the env vars or via the JSON fallback; environment values always override the file.
+- On timeout, the worker stops the Copilot session, marks the TaskRun timed out, and returns a timeout error. The scheduler treats it like any other failure: attempts increment, the agent returns to `idle`, and the item leaves `in_progress` for retry until `YARALPHO_MAX_RETRIES` is exhausted.
 
 GitHub Copilot still requires an access token, but the SDK reads it directly from `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_TOKEN`) without going through the config loader.
 
