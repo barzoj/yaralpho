@@ -410,6 +410,62 @@ func TestWorker_VerificationTimeout(t *testing.T) {
 	require.Equal(t, 1, timeoutMetrics)
 }
 
+func TestWorker_RunTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	st := newFakeStorage()
+	st.batches["b1"] = storage.Batch{
+		ID:           "b1",
+		RepositoryID: "repo-1",
+		Status:       storage.BatchStatusPending,
+	}
+
+	execEvents := make(chan copilot.RawEvent)
+	cp := &fakeCopilot{
+		eventQueue: []chan copilot.RawEvent{execEvents},
+		sessionIDs: []string{"run-timeout-session"},
+	}
+
+	tr := &fakeTracker{titles: map[string]string{"task-run-timeout": "Run Timeout Task"}}
+	nt := &fakeNotifier{}
+	cfg := stubConfig{
+		config.ExecutionTaskPromptKey:    "exec",
+		config.VerificationTaskPromptKey: "verify",
+		config.TaskRunTimeoutKey:         "5ms",
+		config.TaskExecTimeoutKey:        "0",
+		config.TaskVerifyTimeoutKey:      "0",
+	}
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+
+	w := NewWorker(tr, cp, st, nt, cfg, logger)
+	nextRun := 0
+	w.newRunID = func() string {
+		nextRun++
+		return fmt.Sprintf("run-timeout-%d", nextRun)
+	}
+	w.now = func() time.Time { return time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC) }
+
+	err := w.Process(ctx, WorkItem{BatchID: "b1", TaskRef: "task-run-timeout", Runtime: "codex"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	run := st.runs["run-timeout-1"]
+	require.Equal(t, storage.TaskRunStatusTimedOut, run.Status)
+	require.Equal(t, "run-timeout-session", run.SessionID)
+	require.True(t, cp.stopped)
+	require.Equal(t, 1, cp.stopCalls)
+	require.Equal(t, storage.BatchStatusFailed, st.batches["b1"].Status)
+
+	timeoutEntries := logs.FilterMessage("task phase timed out").All()
+	require.NotEmpty(t, timeoutEntries)
+	fields := timeoutEntries[0].ContextMap()
+	require.Equal(t, "b1", fields["batch_id"])
+	require.Equal(t, "task-run-timeout", fields["task_ref"])
+	require.Equal(t, 5*time.Millisecond, fields["timeout"])
+}
+
 func TestExecuteTask_Success(t *testing.T) {
 	ctx := context.Background()
 	st := newFakeStorage()

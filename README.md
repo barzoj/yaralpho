@@ -68,6 +68,7 @@ The config loader is environment-first with an optional JSON fallback:
 | `YARALPHO_MAX_RETRIES`              | no        | `5`           | Max attempts per batch item before the batch is marked `failed`.          |
 | `YARALPHO_SCHEDULER_INTERVAL`       | no        | `10s`         | Interval between scheduler ticks that claim the next eligible batch item. |
 | `YARALPHO_RESTART_WAIT_TIMEOUT`     | no        | `20m`         | Maximum time `/restart?wait=true` will block while draining active runs.  |
+| `YARALPHO_TASK_RUN_TIMEOUT`         | no        | `20m`         | Max total duration per item (execution + verification) before timing out. |
 | `YARALPHO_TASK_EXEC_TIMEOUT`        | no        | `20m`         | Max execution phase duration per item before timing out.                  |
 | `YARALPHO_TASK_VERIFY_TIMEOUT`      | no        | `20m`         | Max verification phase duration per item before timing out.               |
 | `YARALPHO_EXECUTION_TASK_PROMPT`    | no        | built-in      | Prompt template for execution agents (used by worker).                    |
@@ -75,6 +76,7 @@ The config loader is environment-first with an optional JSON fallback:
 | `RALPH_CONFIG`                      | no        | `config.json` | Path to JSON config file (env still wins).                                |
 
 Timeout defaults and behavior:
+- Run timeout defaults to `20m` across execution + verification (`YARALPHO_TASK_RUN_TIMEOUT`). Override via env or JSON; environment values always win.
 - Execution and verification phases default to `20m` (`YARALPHO_TASK_EXEC_TIMEOUT`, `YARALPHO_TASK_VERIFY_TIMEOUT`). Override either by setting the env vars or via the JSON fallback; environment values always override the file.
 - On timeout, the worker stops the Copilot session, marks the TaskRun timed out, and returns a timeout error. The scheduler treats it like any other failure: attempts increment, the agent returns to `idle`, and the item leaves `in_progress` for retry until `YARALPHO_MAX_RETRIES` is exhausted.
 
@@ -92,6 +94,7 @@ GitHub Copilot still requires an access token, but the SDK reads it directly fro
 	"YARALPHO_MAX_RETRIES": "5",
 	"YARALPHO_SCHEDULER_INTERVAL": "10s",
 	"YARALPHO_RESTART_WAIT_TIMEOUT": "20m",
+	"YARALPHO_TASK_RUN_TIMEOUT": "20m",
 	"YARALPHO_TASK_EXEC_TIMEOUT": "20m",
 	"YARALPHO_TASK_VERIFY_TIMEOUT": "20m"
 }

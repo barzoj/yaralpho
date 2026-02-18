@@ -138,27 +138,29 @@ func (w *Worker) clientForRuntime(runtime string) (copilot.Client, error) {
 }
 
 func (w *Worker) handleSingleTask(ctx context.Context, batch *storage.Batch, repoPath string, item WorkItem, cp copilot.Client) error {
+	runCtx, cancelRun := withRunTimeout(ctx, w.cfg, w.logger)
+	defer cancelRun()
 	retries, hasRetries := w.parseMaxRetries()
 	attempts := 0
 	for {
 		attempts++
-		w.notifyTaskEvent(ctx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, repoPath, item.TaskRef), Status: "in_progress", Attempt: attempts})
+		w.notifyTaskEvent(runCtx, notify.Event{Type: "attempt_started", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(runCtx, repoPath, item.TaskRef), Status: "in_progress", Attempt: attempts})
 		execInstruction := fmt.Sprintf("Work on task %s", item.TaskRef)
 		verifyInstruction := fmt.Sprintf("Verify task %s", item.TaskRef)
-		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(ctx, batch, repoPath, item.TaskRef, execInstruction, verifyInstruction, cp)
+		verifyStatus, agentResp, assistantOutput, output, err := w.executeAndVerify(runCtx, batch, repoPath, item.TaskRef, execInstruction, verifyInstruction, cp)
 		if err != nil {
 			return err
 		}
 
 		if agentResp.Status == "failure" {
-			if w.shouldRetry(ctx, batch, repoPath, item.BatchID, item.TaskRef, agentResp, assistantOutput, attempts, retries, hasRetries) {
+			if w.shouldRetry(runCtx, batch, repoPath, item.BatchID, item.TaskRef, agentResp, assistantOutput, attempts, retries, hasRetries) {
 				continue
 			}
 			return fmt.Errorf("verification failed: %s", formatAgentResponseText(agentResp, output))
 		}
 
 		if verifyStatus == storage.TaskRunStatusSucceeded {
-			w.notifyTaskEvent(ctx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(ctx, repoPath, item.TaskRef), Status: "succeeded", Attempt: attempts, Details: formatAgentResponseText(agentResp, output)})
+			w.notifyTaskEvent(runCtx, notify.Event{Type: "verification_succeeded", BatchID: item.BatchID, TaskRef: item.TaskRef, TaskName: w.taskTitle(runCtx, repoPath, item.TaskRef), Status: "succeeded", Attempt: attempts, Details: formatAgentResponseText(agentResp, output)})
 			setBatchStatus(ctx, w.storage, w.logger, batch, storage.BatchStatusPending)
 			return nil
 		}
@@ -180,6 +182,10 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, rep
 		execTimeout = duration
 	} else {
 		execTimeout = duration
+	}
+	parentTimeout := timeoutValue(execCtx)
+	if parentTimeout > 0 && (execTimeout <= 0 || parentTimeout < execTimeout) {
+		execTimeout = parentTimeout
 	}
 	execCtx = withTimeoutMetadata(execCtx, "execute", execTimeout)
 	defer cancel()
@@ -205,6 +211,10 @@ func (w *Worker) executeAndVerify(ctx context.Context, batch *storage.Batch, rep
 		verifyTimeout = duration
 	} else {
 		verifyTimeout = duration
+	}
+	parentVerifyTimeout := timeoutValue(verifyCtx)
+	if parentVerifyTimeout > 0 && (verifyTimeout <= 0 || parentVerifyTimeout < verifyTimeout) {
+		verifyTimeout = parentVerifyTimeout
 	}
 	verifyCtx = withTimeoutMetadata(verifyCtx, "verify", verifyTimeout)
 	defer verifyCancel()
@@ -280,6 +290,37 @@ func (w *Worker) parseMaxRetries() (int, bool) {
 	}
 
 	return maxRetries, true
+}
+
+func withRunTimeout(ctx context.Context, cfg config.Config, logger *zap.Logger) (context.Context, context.CancelFunc) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	if cfg == nil {
+		return withTimeoutMetadata(ctx, "run", 0), func() {}
+	}
+
+	cancel := func() {}
+	timeout := time.Duration(0)
+
+	value, err := cfg.Get(config.TaskRunTimeoutKey)
+	if err != nil {
+		logger.Warn("get run timeout", zap.Error(err))
+		return withTimeoutMetadata(ctx, "run", timeout), cancel
+	}
+
+	duration, parseErr := time.ParseDuration(strings.TrimSpace(value))
+	if parseErr != nil {
+		logger.Warn("invalid run timeout; using parent context", zap.String("value", value), zap.Error(parseErr))
+		return withTimeoutMetadata(ctx, "run", timeout), cancel
+	}
+
+	timeout = duration
+	if duration > 0 {
+		ctx, cancel = context.WithTimeout(ctx, duration)
+	}
+
+	return withTimeoutMetadata(ctx, "run", timeout), cancel
 }
 
 func (w *Worker) taskTitle(ctx context.Context, repoPath, taskRef string) string {

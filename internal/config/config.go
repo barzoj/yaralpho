@@ -29,6 +29,7 @@ const (
 	RestartWaitTimeoutKey     = "YARALPHO_RESTART_WAIT_TIMEOUT"
 	ExecutionTaskPromptKey    = "YARALPHO_EXECUTION_TASK_PROMPT"
 	VerificationTaskPromptKey = "YARALPHO_VERIFICATION_TASK_PROMPT"
+	TaskRunTimeoutKey         = "YARALPHO_TASK_RUN_TIMEOUT"
 	TaskExecTimeoutKey        = "YARALPHO_TASK_EXEC_TIMEOUT"
 	TaskVerifyTimeoutKey      = "YARALPHO_TASK_VERIFY_TIMEOUT"
 	ConfigPathOverride        = "RALPH_CONFIG"
@@ -39,6 +40,7 @@ const (
 	defaultMaxRetries          = "5"
 	defaultSchedulerInterval   = "10s"
 	defaultRestartWaitTimeout  = "20m"
+	defaultTaskRunTimeout      = "20m"
 	defaultTaskExecTimeout     = "20m"
 	defaultTaskVerifyTimeout   = "20m"
 	defaultExecutionTaskPrompt = `
@@ -149,6 +151,7 @@ var envOverrideKeys = []string{
 	RestartWaitTimeoutKey,
 	ExecutionTaskPromptKey,
 	VerificationTaskPromptKey,
+	TaskRunTimeoutKey,
 	TaskExecTimeoutKey,
 	TaskVerifyTimeoutKey,
 }
@@ -170,6 +173,7 @@ func LoggableKeys() []string {
 		RestartWaitTimeoutKey,
 		ExecutionTaskPromptKey,
 		VerificationTaskPromptKey,
+		TaskRunTimeoutKey,
 		TaskExecTimeoutKey,
 		TaskVerifyTimeoutKey,
 	}
@@ -231,6 +235,9 @@ func LoadWithPath(logger *zap.Logger, path string) (Config, error) {
 	}
 	if strings.TrimSpace(values[RestartWaitTimeoutKey]) == "" {
 		values[RestartWaitTimeoutKey] = defaultRestartWaitTimeout
+	}
+	if strings.TrimSpace(values[TaskRunTimeoutKey]) == "" {
+		values[TaskRunTimeoutKey] = defaultTaskRunTimeout
 	}
 	if strings.TrimSpace(values[TaskExecTimeoutKey]) == "" {
 		values[TaskExecTimeoutKey] = defaultTaskExecTimeout

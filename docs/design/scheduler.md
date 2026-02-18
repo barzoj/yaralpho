@@ -56,11 +56,13 @@ The `paused` status skips scheduling new work while allowing in-flight items to 
 - `YARALPHO_SCHEDULER_INTERVAL` (default `10s`) – tick cadence.
 - `YARALPHO_MAX_RETRIES` (default `5`) – attempts per batch item before marking batch failed.
 - `YARALPHO_RESTART_WAIT_TIMEOUT` (default `20m`) – max block time for `/restart?wait=true`.
+- `YARALPHO_TASK_RUN_TIMEOUT` (default `20m`) – max total duration per task run across execution and verification.
 - `YARALPHO_TASK_EXEC_TIMEOUT` (default `20m`) – max duration allowed for the execution phase of a task run.
 - `YARALPHO_TASK_VERIFY_TIMEOUT` (default `20m`) – max duration allowed for the verification phase of a task run.
 
 ### Timeout behavior
 
+- The worker wraps the entire task run (execution + verification, including retries) in `YARALPHO_TASK_RUN_TIMEOUT`; a deadline cancels the run, stops the Copilot session, and surfaces a timeout error.
 - Worker execution and verification phases run under their respective timeouts; on deadline exceeded the worker stops the Copilot session, marks the run timed out, and returns the timeout error.
 - The scheduler handles timeout errors like other failures: it increments `attempts`, releases the agent back to `idle`, and moves the item out of `in_progress` for retry until `YARALPHO_MAX_RETRIES` is reached.
 
