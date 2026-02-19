@@ -36,19 +36,7 @@ func (c *Client) GetBatchProgress(ctx context.Context, batchID string) (storage.
 		if err := cur.Decode(&row); err != nil {
 			return storage.BatchProgress{}, fmt.Errorf("decode progress: %w", err)
 		}
-		progress.Total += row.Count
-		switch row.Status {
-		case storage.TaskRunStatusRunning:
-			progress.Running = row.Count
-		case storage.TaskRunStatusSucceeded:
-			progress.Succeeded = row.Count
-		case storage.TaskRunStatusFailed:
-			progress.Failed = row.Count
-		case storage.TaskRunStatusStopped:
-			progress.Stopped = row.Count
-		default:
-			progress.Pending += row.Count
-		}
+		updateProgressCounts(&progress, row.Status, row.Count)
 	}
 	if err := cur.Err(); err != nil {
 		return storage.BatchProgress{}, fmt.Errorf("iterate progress: %w", err)
@@ -61,4 +49,26 @@ func (c *Client) GetBatchProgress(ctx context.Context, batchID string) (storage.
 	}
 
 	return progress, nil
+}
+
+// updateProgressCounts adjusts aggregated progress counters for a given run status.
+// It centralizes status-to-bucket mapping to keep batch progress semantics consistent
+// across tests and implementations.
+func updateProgressCounts(progress *storage.BatchProgress, status storage.TaskRunStatus, count int) {
+	if progress == nil || count == 0 {
+		return
+	}
+	progress.Total += count
+	switch status {
+	case storage.TaskRunStatusRunning:
+		progress.Running += count
+	case storage.TaskRunStatusSucceeded:
+		progress.Succeeded += count
+	case storage.TaskRunStatusFailed, storage.TaskRunStatusTimedOut:
+		progress.Failed += count
+	case storage.TaskRunStatusStopped:
+		progress.Stopped += count
+	default:
+		progress.Pending += count
+	}
 }
