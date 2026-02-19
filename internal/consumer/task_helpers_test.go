@@ -153,3 +153,55 @@ func TestExecuteTaskNotifiesTaskFinishedWithTitle(t *testing.T) {
 	require.Len(t, nt.finished, 1)
 	require.Equal(t, taskFinished{batchID: "batch-1", runID: "run-1", taskRef: "task-1", taskName: "Task One", status: "succeeded"}, nt.finished[0])
 }
+
+type ctxObservingStorage struct {
+	*stubStorage
+	runCtxErrs   []error
+	batchCtxErrs []error
+}
+
+func (s *ctxObservingStorage) UpdateTaskRun(ctx context.Context, run *storage.TaskRun) error {
+	s.runCtxErrs = append(s.runCtxErrs, ctx.Err())
+	return s.stubStorage.UpdateTaskRun(context.Background(), run)
+}
+
+func (s *ctxObservingStorage) UpdateBatch(ctx context.Context, batch *storage.Batch) error {
+	s.batchCtxErrs = append(s.batchCtxErrs, ctx.Err())
+	return s.stubStorage.UpdateBatch(context.Background(), batch)
+}
+
+func TestExecuteTaskTimeoutPersistsWithFreshContext(t *testing.T) {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+
+	st := &ctxObservingStorage{stubStorage: newStubStorage()}
+	nt := &taskNotifier{}
+	tr := stubTracker{title: "Timeout Task"}
+	batch := &storage.Batch{ID: "batch-timeout", Status: storage.BatchStatusPending}
+
+	status, err := executeTask(
+		timeoutCtx,
+		stubCopilot{},
+		st,
+		tr,
+		nt,
+		zap.NewNop(),
+		"/repo",
+		func() string { return "run-timeout-persist" },
+		func() time.Time { return time.Date(2026, 2, 19, 0, 0, 0, 0, time.UTC) },
+		batch,
+		"task-timeout",
+		"prompt",
+	)
+
+	require.Error(t, err)
+	require.Equal(t, storage.TaskRunStatusTimedOut, status)
+	require.Equal(t, storage.TaskRunStatusTimedOut, st.runs["run-timeout-persist"].Status)
+	require.Equal(t, storage.BatchStatusFailed, batch.Status)
+
+	require.NotEmpty(t, st.runCtxErrs)
+	require.Nil(t, st.runCtxErrs[len(st.runCtxErrs)-1], "UpdateTaskRun should be called with a non-canceled context")
+
+	require.NotEmpty(t, st.batchCtxErrs)
+	require.Nil(t, st.batchCtxErrs[len(st.batchCtxErrs)-1], "UpdateBatch should be called with a non-canceled context")
+}

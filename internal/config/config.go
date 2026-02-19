@@ -40,9 +40,9 @@ const (
 	defaultMaxRetries          = "5"
 	defaultSchedulerInterval   = "10s"
 	defaultRestartWaitTimeout  = "20m"
-	defaultTaskRunTimeout      = "20m"
-	defaultTaskExecTimeout     = "20m"
-	defaultTaskVerifyTimeout   = "20m"
+	defaultTaskRunTimeout      = "1h"
+	defaultTaskExecTimeout     = "1h"
+	defaultTaskVerifyTimeout   = "1h"
 	defaultExecutionTaskPrompt = `
 You are an execution agent. No human will answer questions. Finish the task end-to-end.
 

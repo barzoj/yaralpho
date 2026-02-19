@@ -144,15 +144,15 @@ func TestOptionalSlackNotRequired(t *testing.T) {
 
 	runTimeout, err := cfg.Get(TaskRunTimeoutKey)
 	require.NoError(t, err)
-	require.Equal(t, "20m", runTimeout)
+	require.Equal(t, "1h", runTimeout)
 
 	execTimeout, err := cfg.Get(TaskExecTimeoutKey)
 	require.NoError(t, err)
-	require.Equal(t, "20m", execTimeout)
+	require.Equal(t, "1h", execTimeout)
 
 	verifyTimeout, err := cfg.Get(TaskVerifyTimeoutKey)
 	require.NoError(t, err)
-	require.Equal(t, "20m", verifyTimeout)
+	require.Equal(t, "1h", verifyTimeout)
 
 	execPrompt, err := cfg.Get(ExecutionTaskPromptKey)
 	require.NoError(t, err)

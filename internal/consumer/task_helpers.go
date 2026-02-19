@@ -147,6 +147,7 @@ func executeTask(
 
 	status := storage.TaskRunStatusSucceeded
 	var finalErr error
+	persistCtx := context.WithoutCancel(ctx)
 
 eventLoop:
 	for {
@@ -201,22 +202,22 @@ eventLoop:
 		logTimeoutEvent(ctx, logger, batch.ID, run.TaskRef, timeoutValue(ctx), finished.Sub(run.StartedAt), finalErr)
 	}
 
-	if err := st.UpdateTaskRun(ctx, &run); err != nil {
+	if err := st.UpdateTaskRun(persistCtx, &run); err != nil {
 		logger.Error("update task run", zap.Error(err), zap.String("run_id", run.ID))
 	}
 
 	switch status {
 	case storage.TaskRunStatusSucceeded:
-		_ = nt.NotifyTaskFinished(ctx, batch.ID, run.ID, run.TaskRef, taskName, string(run.Status), "")
+		_ = nt.NotifyTaskFinished(persistCtx, batch.ID, run.ID, run.TaskRef, taskName, string(run.Status), "")
 	case storage.TaskRunStatusStopped:
-		_ = nt.NotifyBatchIdle(ctx, batch.ID)
-		setBatchStatus(ctx, st, logger, batch, storage.BatchStatusPending)
+		_ = nt.NotifyBatchIdle(persistCtx, batch.ID)
+		setBatchStatus(persistCtx, st, logger, batch, storage.BatchStatusPending)
 	default:
 		if finalErr == nil {
 			finalErr = fmt.Errorf("task run failed")
 		}
-		_ = nt.NotifyError(ctx, batch.ID, run.ID, run.TaskRef, finalErr)
-		setBatchStatus(ctx, st, logger, batch, storage.BatchStatusFailed)
+		_ = nt.NotifyError(persistCtx, batch.ID, run.ID, run.TaskRef, finalErr)
+		setBatchStatus(persistCtx, st, logger, batch, storage.BatchStatusFailed)
 	}
 
 	return status, finalErr
