@@ -2219,6 +2219,30 @@
     return Math.max(0, total);
   }
 
+  function isMobileViewport() {
+    return (window.innerWidth || 0) <= NAV_MOBILE_BREAKPOINT;
+  }
+
+  function setRunHeaderCollapsed(headerEl, collapsed, toggleButton) {
+    if (!headerEl) return;
+    headerEl.dataset.collapsed = collapsed ? "true" : "false";
+    if (toggleButton) {
+      toggleButton.textContent = collapsed ? "Show header" : "Hide header";
+      toggleButton.setAttribute("aria-expanded", String(!collapsed));
+    }
+  }
+
+  function syncRunHeaderForViewport(state) {
+    if (!state || !state.header) return;
+    const mobile = isMobileViewport();
+    const shouldCollapse = mobile ? state.collapsed ?? true : false;
+    if (state.headerToggleRow?.style) {
+      state.headerToggleRow.style.display = mobile ? "flex" : "none";
+    }
+    setRunHeaderCollapsed(state.header, shouldCollapse, state.toggleButton);
+    state.collapsed = shouldCollapse;
+  }
+
   function isNearBottom(element, thresholdPx = SCROLL_FOLLOW_THRESHOLD_PX) {
     if (!element) return true;
     const threshold = Number.isFinite(thresholdPx) ? thresholdPx : SCROLL_FOLLOW_THRESHOLD_PX;
@@ -2308,9 +2332,13 @@
     scroll.style.overflowY = "auto";
   }
 
-  function attachRunLayout(container) {
+  function attachRunLayout(container, headerState) {
     applyRunLayoutSizing(container);
-    const handler = () => applyRunLayoutSizing(container);
+    syncRunHeaderForViewport(headerState);
+    const handler = () => {
+      applyRunLayoutSizing(container);
+      syncRunHeaderForViewport(headerState);
+    };
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }
@@ -2393,6 +2421,32 @@
     const header = document.createElement("div");
     header.className = "run-header card";
 
+    const headerToggleRow = document.createElement("div");
+    headerToggleRow.className = "run-header-toggle-row";
+
+    const headerToggleText = document.createElement("div");
+    headerToggleText.className = "run-header-toggle-text";
+    const headerTitle = document.createElement("div");
+    headerTitle.className = "run-header-title";
+    const headerSubtitle = document.createElement("div");
+    headerSubtitle.className = "run-header-subtitle";
+    headerToggleText.appendChild(headerTitle);
+    headerToggleText.appendChild(headerSubtitle);
+
+    const headerToggleButton = document.createElement("button");
+    headerToggleButton.type = "button";
+    headerToggleButton.className = "run-header-toggle";
+    headerToggleButton.setAttribute("aria-expanded", "true");
+    headerToggleButton.setAttribute("aria-controls", "run-header-content");
+    headerToggleButton.innerHTML = '<span aria-hidden="true">☰</span> Hide header';
+
+    headerToggleRow.appendChild(headerToggleText);
+    headerToggleRow.appendChild(headerToggleButton);
+
+    const headerContent = document.createElement("div");
+    headerContent.className = "run-header-content";
+    headerContent.id = "run-header-content";
+
     const eventsSection = document.createElement("div");
     eventsSection.className = "run-events card";
 
@@ -2400,10 +2454,22 @@
     eventsScroll.className = "events-scroll";
     eventsSection.appendChild(eventsScroll);
 
+    header.appendChild(headerToggleRow);
+    header.appendChild(headerContent);
     layout.appendChild(header);
     layout.appendChild(eventsSection);
 
-    return { layout, header, eventsScroll, eventsSection };
+    return {
+      layout,
+      header,
+      headerContent,
+      headerToggleRow,
+      headerToggleButton,
+      headerTitle,
+      headerSubtitle,
+      eventsScroll,
+      eventsSection,
+    };
   }
 
   function formatEventsInfoText(visibleCount, totalCount, streamingHiddenCount, truncatedCount) {
@@ -2690,11 +2756,16 @@
     }
 
     const layout = createRunLayout();
-    layout.header.appendChild(actions);
-    layout.header.appendChild(renderRunMeta(run));
+    layout.headerTitle.textContent = run.task_ref || `Run ${runId}`;
+    layout.headerSubtitle.textContent = run.status
+      ? `${run.status} · ${formatDate(run.started_at) || "started"}`
+      : formatDate(run.started_at) || "";
+
+    layout.headerContent.appendChild(actions);
+    layout.headerContent.appendChild(renderRunMeta(run));
     const liveStatus = document.createElement("div");
     liveStatus.className = "pill live-status";
-    layout.header.appendChild(liveStatus);
+    layout.headerContent.appendChild(liveStatus);
 
     let eventsData;
     try {
@@ -2723,7 +2794,7 @@
       streamingHiddenCount,
       truncatedCount
     );
-    layout.header.appendChild(info);
+    layout.headerContent.appendChild(info);
 
     const eventsContainer = renderEventsList(visibleEvents);
     layout.eventsScroll.appendChild(eventsContainer);
@@ -2733,6 +2804,20 @@
       thresholdPx: SCROLL_FOLLOW_THRESHOLD_PX,
       onModeChange: (mode) => updateLiveFollowIndicator(liveStatus, mode),
     });
+
+    const runHeaderState = {
+      header: layout.header,
+      headerToggleRow: layout.headerToggleRow,
+      toggleButton: layout.headerToggleButton,
+      collapsed: isMobileViewport(),
+    };
+
+    layout.headerToggleButton.addEventListener("click", () => {
+      if (!isMobileViewport()) return;
+      runHeaderState.collapsed = !runHeaderState.collapsed;
+      setRunHeaderCollapsed(layout.header, runHeaderState.collapsed, layout.headerToggleButton);
+    });
+    syncRunHeaderForViewport(runHeaderState);
 
     liveStreamState = {
       runId,
@@ -2749,7 +2834,7 @@
       liveStatusEl: liveStatus,
     };
 
-    runLayoutCleanup = attachRunLayout(layout.layout);
+    runLayoutCleanup = attachRunLayout(layout.layout, runHeaderState);
 
     ensureReconnectController(runId);
     console.info("[live events] prepared initial state", {
